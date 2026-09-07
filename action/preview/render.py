@@ -288,24 +288,29 @@ def passage_list(changes, url, budget, max_passages=0, latest=False, downloads=T
 
 
 def text_excerpt(change, options):
+    def context_markup(node):
+        if len(plain(node)) <= 600:
+            return inline(node)
+        # Never concatenate deleted and inserted wording when shortening context.
+        current = ' '.join(''.join(node.xpath('.//text()[not(ancestor::h:del)]', namespaces=NS)).split())
+        return html.escape(current[:600]) + ('…' if len(current) > 600 else '')
+
     parts = []
     if 'node' in change:
         before = surrounding_blocks(change['node'], 'before', options.context_paragraphs)
         after = surrounding_blocks(change['node'], 'after', options.context_paragraphs)
         for node in before:
-            value = plain(node)
-            parts.append(f'<p><em>{html.escape(value[:600])}{"…" if len(value) > 600 else ""}</em></p>')
+            parts.append(f'<p><em>{context_markup(node)}</em></p>')
     parts.append(f"<p>{change['markup']}</p>")
     if 'node' in change:
         for node in after:
-            value = plain(node)
-            parts.append(f'<p><em>{html.escape(value[:600])}{"…" if len(value) > 600 else ""}</em></p>')
+            parts.append(f'<p><em>{context_markup(node)}</em></p>')
     return '\n\n'.join(parts)
 
 
 def preview_section(document, opened=False, text_budget=0, options=None):
     options = options or Options(pages=bool(document.get('url')))
-    record, url = document['record'], document.get('url')
+    record, url = document['record'], document.get('url') if options.pages else None
     latest = options.mode == 'latest' or (not record.get('redline') and bool(record.get('document')))
     changes = document.get('latest_changes', []) if options.mode == 'latest' else document['changes']
     if record.get('error') or not (record.get('redline') or record.get('latest') or (not options.pages and record.get('document'))):
@@ -345,7 +350,7 @@ def preview_section(document, opened=False, text_budget=0, options=None):
         elif not changes and text_budget:
             lines += ['No text passages to display. Formatting and other document details remain available in the Word download.', '']
     if latest_budget:
-        lines += [passage_list(document.get('latest_changes', []), document.get('latest_url'), latest_budget,
+        lines += [passage_list(document.get('latest_changes', []), document.get('latest_url') if options.pages else None, latest_budget,
                                options.max_passages, latest=True, downloads=options.downloads), '']
     lines += ['</details>', '']
     return '\n'.join(lines)
@@ -409,7 +414,8 @@ def review_comment(item, documents, review_url=None, budget=58000, options=None)
     prefix = header + table + ''.join(rows) + notice + legend
     remaining = budget - comment_size(prefix + footer + ''.join(sections)) - 500
     share = max(0, remaining // max(sum(bool(section) for section in sections), 1))
-    sections = [preview_section(d, opened=count == 1, text_budget=share, options=options) for d in included]
+    sections = [preview_section(d, opened=count == 1, text_budget=share, options=options)
+                if share >= 600 or options.pages and d['images'] else '' for d in included]
     body = prefix + ''.join(sections) + footer
     if comment_size(body) > budget:
         raise ValueError('Review comment exceeds its size budget')

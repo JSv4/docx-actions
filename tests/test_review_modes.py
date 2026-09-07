@@ -153,3 +153,25 @@ def test_post_uses_real_artifact_url_without_a_pages_url(tmp_path, monkeypatch):
     artifact_url = 'https://github.com/o/r/actions/runs/1/artifacts/2'
     transport.post(comments, artifact_url=artifact_url)
     assert writes == [f'<!-- docx-redlines-preview:index -->\n[Download]({artifact_url})']
+
+
+def test_short_context_keeps_neighboring_revisions_visible(tmp_path, catalog, monkeypatch):
+    path, source, record = catalog
+    source.joinpath('diff.html').write_text('''<html xmlns="http://www.w3.org/1999/xhtml"><head/><body>
+<p>Before <del>old</del><ins>new</ins> wording.</p>
+<p>Due in <del>30</del><ins>45</ins> days.</p><p>After.</p></body></html>''')
+    changes = render.prepare_document(source/'diff.html', tmp_path/'document.html')
+    excerpt = render.text_excerpt(changes[1], Options())
+    assert '<em>Before <del>old</del><ins>new</ins> wording.</em>' in excerpt
+    assert 'oldnew' not in excerpt
+
+
+def test_comment_limit_reserves_space_for_real_download_urls():
+    documents = [{'record': {'path': f'{i}/contract.docx', 'status': 'modified', 'redline': 'out.docx', 'revisions': 2},
+                  'url': 'https://old.example/should-not-be-used/', 'images': [],
+                  'changes': [{'number': 1, 'kind': 'Text', 'id': 'change-1', 'markup': '<ins>new wording</ins>'}]} for i in range(500)]
+    body = render.review_comment({'sha': 'a'*40, 'run_url': 'https://github.com/o/r/actions/runs/1'}, documents, options=Options())
+    assert len(body.replace(render.ARTIFACT_URL, 'x'*256)) <= 58000
+    assert 'old.example' not in body
+    assert 'of 500 documents here' in body
+    assert '<details' not in body

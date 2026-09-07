@@ -11,13 +11,71 @@ on:
         description: Pull request number for a manual comparison; automatic on PR events.
         type: number
         default: 0
-      publish:
-        description: Deploy to this repository's Pages site and update PR comments.
+      mode:
+        description: Output redline, latest (no comparison), or both.
+        type: string
+        default: redline
+      pages:
+        description: Publish the full viewer to GitHub Pages. Explicit opt-in; owns the entire site.
+        type: boolean
+        default: false
+      allow-pages-overwrite:
+        description: Explicitly permit replacing an existing unrelated Pages site.
+        type: boolean
+        default: false
+      comments:
+        description: Create or update one PR review comment.
+        type: boolean
+        default: true
+      inline-preview:
+        description: Include contextual redline excerpts or latest-version text in the comment.
+        type: boolean
+        default: true
+      change-log:
+        description: Include the expandable per-document change log in redline and both modes.
+        type: boolean
+        default: true
+      downloads:
+        description: Show Word and review-bundle download links.
+        type: boolean
+        default: true
+      context-paragraphs:
+        description: Preceding and following paragraphs per excerpt (0–10).
+        type: number
+        default: 1
+      preview-count:
+        description: Contextual excerpts per document; rendered as images with Pages (0–20).
+        type: number
+        default: 2
+      max-passages:
+        description: Maximum inline log or latest-version passages per document; 0 means as many as fit.
+        type: number
+        default: 0
+      comment-budget:
+        description: Maximum comment characters (4000–58000). Complete logs are always retained in artifacts.
+        type: number
+        default: 58000
+      retention-days:
+        description: Retention of comparison and review artifacts, subject to repository limits.
+        type: number
+        default: 90
+      detect-moves:
+        description: Recognize moved provisions with Docxodus.
+        type: boolean
+        default: true
+      author:
+        description: Author recorded on generated tracked changes.
+        type: string
+        default: DOCX Actions
+      summary:
+        description: Include the comparison table and review links in the Actions job summary.
         type: boolean
         default: true
 
 jobs:
   compare:
+    env:
+      REVIEW_OPTIONS: ${{ toJSON(inputs) }}
     if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && inputs.pull-request > 0)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -32,6 +90,8 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .docx-actions
           persist-credentials: false
+      - name: Validate review options
+        run: python .docx-actions/action/preview/options.py
       - name: Read the pull request
         id: context
         env:
@@ -53,7 +113,7 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.context.outputs.pr }}
         run: git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
-      - name: Compare every changed Word document
+      - name: Render every changed Word document
         if: steps.context.outputs.open == 'true'
         id: compare
         uses: ./.docx-actions
@@ -63,7 +123,10 @@ jobs:
           output-dir: ${{ github.workspace }}/redlines
           html-preview: 'true'
           render-unpaired: 'true'
-          detect-moves: 'true'
+          detect-moves: ${{ inputs.detect-moves }}
+          mode: ${{ inputs.mode }}
+          author: ${{ inputs.author }}
+          summary: ${{ inputs.summary }}
           upload-artifact: 'false'
       - name: Preserve every file result, including failures and empty comparisons
         if: always() && steps.context.outputs.open == 'true' && hashFiles('redlines/manifest.json') != ''
@@ -72,27 +135,21 @@ jobs:
           name: docx-actions-pr-${{ steps.context.outputs.pr }}
           path: redlines
           if-no-files-found: error
-          retention-days: 90
+          retention-days: ${{ inputs.retention-days }}
           overwrite: true
 
   preview:
     needs: compare
-    if: always() && !cancelled() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch')
+    if: always() && !cancelled() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && !inputs.pages
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: read
-      actions: read
-      pages: write
-      id-token: write
-      pull-requests: write
+    # Inherit caller permissions; only Pages callers grant pages/id-token write.
+    env:
+      REVIEW_OPTIONS: ${{ toJSON(inputs) }}
     concurrency:
-      group: docx-actions-pages
+      group: docx-actions-review
       cancel-in-progress: false
-    environment:
-      name: ${{ inputs.publish && 'github-pages' || 'docx-preview-build' }}
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
+    steps: &review_steps
       - name: Check out the trusted preview implementation
         uses: actions/checkout@v4
         with:
@@ -106,38 +163,70 @@ jobs:
       - name: Install the preview renderer
         run: |
           python -m pip install lxml==6.0.2 playwright==1.58.0
-          python -m playwright install --with-deps chromium
+      - name: Install the screenshot browser for Pages excerpts
+        if: inputs.pages && inputs.inline-preview && inputs.preview-count > 0 && inputs.mode != 'latest'
+        run: python -m playwright install --with-deps chromium
       - name: Read comparison artifacts for open pull requests
         env:
           GH_TOKEN: ${{ github.token }}
         run: python .docx-actions/action/preview/github.py collect
+      - name: Verify Pages belongs to DOCX Actions before publishing
+        if: inputs.pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALLOW_OVERWRITE: ${{ inputs.allow-pages-overwrite }}
+        run: |
+          ARGS=()
+          if [ "$ALLOW_OVERWRITE" = "true" ]; then
+            ARGS+=(--allow-overwrite)
+          fi
+          python .docx-actions/action/preview/github.py check-pages "${ARGS[@]}"
       - uses: actions/configure-pages@v5
-        if: inputs.publish
+        if: inputs.pages
         id: pages
       - name: Build contextual images and full document viewers
         env:
-          PAGES_URL: ${{ steps.pages.outputs.base_url || format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+          PAGES_URL: ${{ steps.pages.outputs.base_url }}
         run: python .docx-actions/action/preview/render.py --base-url "$PAGES_URL"
-      - name: Preserve the generated site for inspection
+      - name: Preserve the complete review and change logs
+        id: bundle
         uses: actions/upload-artifact@v4
         with:
           name: docx-review-site
+          retention-days: ${{ inputs.retention-days }}
           path: |
             _site
             _preview_comments.json
           if-no-files-found: error
           overwrite: true
       - uses: actions/upload-pages-artifact@v4
-        if: inputs.publish
+        if: inputs.pages
         with:
           path: _site
       - name: Deploy browser views and inline images
-        if: inputs.publish
+        if: inputs.pages
         id: deploy
         uses: actions/deploy-pages@v4
-      - name: Update the consolidated PR review comment after deployment
-        if: inputs.publish
+      - name: Update the consolidated PR review comment
+        if: inputs.comments
         env:
           GH_TOKEN: ${{ github.token }}
           PAGES_URL: ${{ steps.pages.outputs.base_url }}
-        run: python .docx-actions/action/preview/github.py post --base-url "$PAGES_URL"
+          REVIEW_ARTIFACT_URL: ${{ steps.bundle.outputs.artifact-url }}
+        run: python .docx-actions/action/preview/github.py post --base-url "$PAGES_URL" --artifact-url "$REVIEW_ARTIFACT_URL"
+
+  pages:
+    needs: compare
+    if: always() && !cancelled() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && inputs.pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Inherit caller permissions; only Pages callers grant pages/id-token write.
+    env:
+      REVIEW_OPTIONS: ${{ toJSON(inputs) }}
+    concurrency:
+      group: docx-actions-review
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps: *review_steps

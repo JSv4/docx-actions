@@ -409,3 +409,43 @@ def test_required_html_failure_is_reported_but_other_files_continue(repo, tmp_pa
     records = json.loads((output / 'manifest.json').read_text())['files']
     assert len(records) == 2
     assert all(record['error'] and record['redline'] for record in records)
+
+
+@pytest.mark.parametrize('mode', ['latest', 'both'])
+def test_modes_preserve_the_head_document_and_latest_skips_comparison(repo, tmp_path, monkeypatch, mode):
+    original = (FIXTURES / 'original.docx').read_bytes()
+    modified = (FIXTURES / 'modified.docx').read_bytes()
+    commit_file(repo, 'removed.docx', original)
+    base = commit_file(repo, 'nested/contract.DOCX', original)
+    (repo / 'removed.docx').unlink()
+    head = commit_file(repo, 'nested/contract.DOCX', modified)
+    monkeypatch.chdir(repo)
+    if mode == 'latest':
+        monkeypatch.setattr(ra, 'make_engine', lambda *_: pytest.fail('Latest mode must not initialize the differ'))
+    output = tmp_path / mode
+    assert ra.main({'INPUT_BASE_REF': base, 'INPUT_HEAD_REF': head, 'INPUT_MODE': mode,
+                    'INPUT_OUTPUT_DIR': str(output), 'INPUT_HTML_PREVIEW': 'false',
+                    'INPUT_RENDER_UNPAIRED': 'true'}) == 0
+    manifest = json.loads((output / 'manifest.json').read_text())
+    assert manifest['mode'] == mode
+    records = {r['path']: r for r in manifest['files']}
+    current = records['nested/contract.DOCX']
+    assert (output / current['latest']).read_bytes() == modified
+    assert records['removed.docx']['latest'] is None
+    if mode == 'latest':
+        assert all(r['redline'] is None and r['revisions'] is None for r in records.values())
+        assert records['removed.docx']['document'] is None
+    else:
+        assert current['revisions'] == 10 and current['redline'] != current['latest']
+        assert records['removed.docx']['document']
+
+
+@pytest.mark.parametrize('with_original', [True, False])
+def test_latest_mode_supports_explicit_pair_without_comparison(tmp_path, monkeypatch, with_original):
+    monkeypatch.setattr(ra, 'make_engine', lambda *_: pytest.fail('No differ expected'))
+    assert ra.main({'INPUT_ORIGINAL': str(FIXTURES / 'original.docx') if with_original else '',
+                    'INPUT_MODIFIED': str(FIXTURES / 'modified.docx'), 'INPUT_MODE': 'latest',
+                    'INPUT_HTML_PREVIEW': 'false', 'INPUT_OUTPUT_DIR': str(tmp_path)}) == 0
+    [record] = json.loads((tmp_path / 'manifest.json').read_text())['files']
+    assert (tmp_path / record['latest']).read_bytes() == (FIXTURES / 'modified.docx').read_bytes()
+    assert record['redline'] is None

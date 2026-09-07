@@ -3,29 +3,28 @@
 [![Tests](https://github.com/JSv4/docx-actions/actions/workflows/ci.yml/badge.svg)](https://github.com/JSv4/docx-actions/actions/workflows/ci.yml)
 
 Automatically review **every changed Word document** in a GitHub pull request.
-Get contextual previews in the PR, a complete browser viewer, and downloadable
-Word files with native tracked changes. Powered by
-[Docxodus](https://github.com/JSv4/Docxodus) through
+By default, one updating comment shows text redlines, surrounding context, and
+expandable change logs. Download the Word files with native tracked changes and
+the complete HTML and change logs from the linked Actions artifact.
+**No GitHub Pages setup or personal token is needed.**
+
+The optional Pages viewer preserves document layout, adds screenshot excerpts to
+the comment, and provides navigation through the full document. You can also
+render just the latest versions, or generate both versions and redlines.
+Powered by [Docxodus](https://github.com/JSv4/Docxodus) through
 [Python-Redlines](https://github.com/JSv4/Python-Redlines).
 
-**[Watch the 43-second walkthrough](docs/media/docx-actions-walkthrough.mp4)** ·
+**[Watch the Pages walkthrough](docs/media/docx-actions-walkthrough.mp4)** ·
 [Download MP4](https://raw.githubusercontent.com/JSv4/docx-actions/main/docs/media/docx-actions-walkthrough.mp4) ·
-[Cover image and captions](docs/media/)
+[Try the demo](https://github.com/JSv4/docxodus-action-demo/pull/1)
 
-<a href="docs/media/docx-actions-walkthrough.mp4"><img src="docs/media/docx-actions-poster.png" alt="Watch DOCX Actions automatically review Word documents" width="480"></a>
+<a href="docs/media/docx-actions-walkthrough.mp4"><img src="docs/media/docx-actions-poster.png" alt="Review Word documents with the optional Pages viewer" width="480"></a>
 
 <a id="install-once"></a>
 
 ## Install automatic PR reviews
 
-Use the reusable workflow below for the complete experience shown in the video:
-automatic discovery, one updating PR comment, contextual previews, and full
-browser redlines. The Marketplace step `uses: JSv4/docx-actions@v1` provides
-[comparison and artifacts](#comparison-without-publishing); the reusable
-workflow also handles Pages deployment and PR comments.
-
-Enable **Settings → Pages → Source: GitHub Actions**, then add
-`.github/workflows/docx-review.yml` to your default branch:
+Add `.github/workflows/docx-review.yml` to your default branch:
 
 ```yaml
 name: Word document review
@@ -38,119 +37,209 @@ permissions:
   contents: read
   actions: read
   pull-requests: write
+
+jobs:
+  review:
+    uses: JSv4/docx-actions/.github/workflows/review.yml@v2
+```
+
+Every changed `.docx` is discovered automatically, including nested folders,
+uppercase extensions, and duplicate filenames in different folders. There is no
+file list, original/revised pair, custom script, or secret to configure.
+
+The reusable workflow handles comments and review artifacts. The root Marketplace
+step, `uses: JSv4/docx-actions@v2`, provides document generation and artifacts for
+[custom workflows](#comparison-without-publishing).
+
+## Choose what to review
+
+The default is `mode: redline`. Modified files are compared against the PR's
+merge-base; added/deleted files and pure renames get labeled document snapshots.
+
+To render the latest version of every changed document without running a
+comparison:
+
+```yaml
+jobs:
+  review:
+    uses: JSv4/docx-actions/.github/workflows/review.yml@v2
+    with:
+      mode: latest
+```
+
+Latest mode shows document text in expandable comment sections and supplies the
+head's Word document and rendered HTML. It does not invent a revision count or
+claim to compare versions. Deleted files are listed as having no latest version.
+Existing tracked changes in the source are accepted for the HTML presentation;
+the downloadable latest Word document preserves the supplied head blob.
+
+Set `mode: both` to include redlines and latest versions. The comment includes
+both text views, the download contains both, and Pages adds links to switch
+between them. Discovery still applies only to files changed in the PR.
+
+## Enable the full Pages viewer
+
+Pages is **off by default**. To enable it, set **Settings → Pages → Source:
+GitHub Actions**, add Pages permissions to the caller, and opt in:
+
+```yaml
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
   pages: write
   id-token: write
 
 jobs:
   review:
-    uses: JSv4/docx-actions/.github/workflows/review.yml@v1
+    uses: JSv4/docx-actions/.github/workflows/review.yml@v2
+    with:
+      pages: true
 ```
 
-That's the complete consumer workflow. No document paths, version pairs,
-Python scripts, browser setup, personal access token, or custom secrets are
-needed. The `@v1` tag tracks compatible version 1 updates. Use `@v1.0.0` for
-the first release, or pin a reviewed commit SHA for reproducible installations.
+This retains the styled full viewer, contextual screenshot excerpts, passage
+links, Previous/Next navigation, and direct Word downloads. Multiple documents
+start collapsed in the PR comment; a single document opens its preview.
 
-The workflow owns the repository's Pages site. Use a dedicated repository if
-you already publish a different website there. Pages visibility determines who
-can read the documents; enabling this workflow publishes the complete documents
-and downloadable Word files there. This installation targets GitHub.com and
-GitHub-hosted Ubuntu runners.
+**A Pages deployment replaces the repository's entire site.** Before deploying,
+the action verifies that the current site is empty or belongs to DOCX Actions.
+It recognizes the original v1 viewer and writes an ownership marker on new sites.
+An unrelated site, or a site whose ownership cannot be verified, blocks deployment.
+Only set `allow-pages-overwrite: true` if you intentionally want to replace the
+whole site. This override also handles access-controlled sites that cannot be
+checked anonymously. Default comment-only runs do not call the Pages API or
+change an existing deployment.
 
-## What happens on a pull request
+Pages visibility determines who can read the complete documents and Word files.
+Existing Pages environment protection rules still apply. Turning `pages` off
+stops future deployments; it does not remove a site published earlier. External
+hosts and deployment into an existing site's build are not packaged integrations
+in this release; the generated site is available in the artifact for custom use.
 
-- All changed `.docx` files are discovered, including root-level files, nested
-  folders, uppercase extensions, and filenames containing spaces.
-- Modified documents are compared against the PR's merge-base. Renames preserve
-  their previous path; a pure rename is labeled as unchanged content.
-- Added and deleted documents get full-document views, clearly labeled as
-  one-sided snapshots rather than tracked-change comparisons.
-- One updatable PR comment lists the documents, revision counts, browser links,
-  and Word downloads. Contextual previews are collapsed for multiple documents;
-  a single-document PR opens its preview automatically. Each excerpt keeps its
-  surrounding text and one **Expand in full document** link.
-- The complete viewer has Previous/Next navigation, passage deep links, and a
-  Word download. Long comments disclose truncation and link to every passage.
-- Pushing another edit updates the same bot comment. Comparisons identify
-  their source commit, and a newer PR head prevents stale comments from posting.
-- Upgrading from the per-document layout preserves the summary comment's URL and
-  removes the obsolete comments owned by this action's bot after updating it.
-  Human comments and unrelated bot comments are retained.
-- Open PRs share one index; publishing one PR retains the others. Closing a PR
-  removes it from the next site build. Code-only PRs don't get new preview comments.
+## Configure the review
 
-Long reviews share the comment space across documents; if GitHub's size limit
-requires shortening the inline content, the comment says so and links to the
-complete browser index. Every document is still compared and published.
-
-Previews are rebuilt from retained comparison artifacts (90 days by default).
-If an artifact expires, its preview disappears on the next rebuild. Manual runs
-rebuild the index; to recompute a particular PR, pass the optional `pull-request`
-input from a caller workflow. An unchanged PR does not automatically refresh an
-expired artifact.
-
-GitHub comments cannot embed the fully styled document. Inline images and a
-small HTML subset provide the in-GitHub view; Pages hosts the full rendering.
-See the complex NVCA contract in the separate
-[demo repository](https://github.com/JSv4/docxodus-action-demo).
-
-## Optional inputs
-
-The reusable workflow accepts:
+All settings are optional. Document discovery is independent of presentation.
 
 | Input | Default | Purpose |
 |---|---|---|
-| `files` | `**/*.docx` | Restrict discovery with newline-separated Git pathspec globs. |
-| `pull-request` | Event PR number | Recompute a PR from a manual run. |
-| `publish` | `true` | Set `false` to build an inspectable site artifact without deploying or commenting. |
+| `mode` | `redline` | `redline`, `latest`, or `both`. Latest skips comparison. |
+| `pages` | `false` | Deploy the full viewer and host screenshot excerpts. |
+| `allow-pages-overwrite` | `false` | Explicitly authorize replacing an unrelated or unverifiable Pages site. |
+| `comments` | `true` | Create/update the consolidated PR comment. Independent of Pages. |
+| `inline-preview` | `true` | Include contextual excerpts or latest-version text. |
+| `change-log` | `true` | Include an expandable change log in redline/both modes. |
+| `downloads` | `true` | Show download links. Generated files remain in artifacts when disabled. |
+| `context-paragraphs` | `1` | Paragraphs before and after an excerpt, from `0` to `10`. Long inline context is shortened visibly. |
+| `preview-count` | `2` | Contextual excerpts per document, from `0` to `20`. Pages renders these as images. |
+| `max-passages` | `0` | Maximum inline change-log/latest-version passages per document; `0` means as many as fit. |
+| `comment-budget` | `58000` | Total comment character budget, from `4000` to `58000`, shared across documents. |
+| `files` | `**/*.docx` | Optional newline-separated Git pathspec globs restricting discovery. |
+| `pull-request` | Event PR number | Recompute a particular PR from a manual run. |
+| `retention-days` | `90` | Comparison/review artifact retention, subject to repository limits. |
+| `detect-moves` | `true` | Detect moved provisions in comparisons. |
+| `author` | `DOCX Actions` | Author recorded on generated tracked changes. |
+| `summary` | `true` | Write Actions job summaries. |
 
-For example, an optional restriction is simply:
+For example, keep the full change log but omit the short excerpts:
 
 ```yaml
-jobs:
-  review:
-    uses: JSv4/docx-actions/.github/workflows/review.yml@v1
-    with:
-      files: 'contracts/**/*.docx'
+with:
+  inline-preview: false
+  change-log: true
 ```
+
+Or build downloadable results without commenting or deploying:
+
+```yaml
+with:
+  comments: false
+  pages: false
+```
+
+## Comments, downloads, and retention
+
+Comments contain a supported HTML subset: inserted/deleted text, basic emphasis,
+and expandable sections. Moves and formatting are labeled in the change log.
+Table rows separate cell text with `|`. Exact Word layout appears in the optional
+Pages screenshots/viewer and in the Word download, rather than in comment text.
+Comment-only mode needs no screenshot browser or external image hosting.
+
+Each review bundle contains an HTML index, per-document HTML and Word files, and
+complete `CHANGELOG.md` reports for each document and PR. Change logs describe the
+passages in the rendered document; Word files preserve the engine's native
+tracked changes. Revision counts and changed-passage counts are different units.
+Long inline reviews disclose truncation; the reports retain every extracted
+passage regardless of `max-passages`, `change-log`, or the comment budget.
+
+Without Pages, download links lead to the Actions review artifact. GitHub
+requires sign-in and repository read access to download it. Extract the bundle
+and open a document's `document.html` for a standalone full rendering. The
+interactive index/viewer can also be served with any local static HTTP server.
+
+Pushing edits updates the same bot-owned comment. Newer PR heads prevent stale
+comments from posting. Human comments and unrelated bot comments are preserved.
+Existing v1 comment URLs survive the upgrade. Code-only PRs do not receive a new
+review comment; if a PR's last Word change disappears, its existing review clears.
+
+When enabled, Pages combines matching review artifacts from open PRs into one
+index and removes closed PRs on the next build. Artifacts expire after their
+retention period; expired previews disappear on the next Pages build. Manual
+runs rebuild retained results. To change modes or regenerate expired results,
+pass `pull-request` from a manually triggered caller so that comparison/rendering
+runs again. Merely changing a presentation mode cannot recreate missing outputs.
+
+## Upgrading from v1
+
+Version 2 makes Pages opt-in and enables inline comments without hosting. Existing
+`@v1` and `@v1.0.0` installations retain their original behavior; the `v1` tag is
+not moved to version 2. `@v2` tracks compatible version 2 updates, and `@v2.0.0`
+pins this release.
+
+- To keep your existing Pages experience, switch to `@v2` and add `pages: true`.
+- To adopt the default comment-only review, switch to `@v2` and remove Pages/OIDC
+  permissions from the caller. Your already-published site is left in place.
+- The old `publish` input is replaced by independent `pages` and `comments`
+  settings. The old `publish: false` behavior becomes both settings set to false.
 
 ## Comparison without publishing
 
-The repository root also exposes a conventional composite action. It discovers
-changed DOCX files on pull requests or pushes and uploads HTML/Word artifacts:
+The root composite action discovers changed documents on pull requests or
+pushes and uploads generated files, without posting comments or deploying:
 
 ```yaml
 steps:
   - uses: actions/checkout@v4
     with:
       fetch-depth: 0
-  - uses: JSv4/docx-actions@v1
+  - uses: JSv4/docx-actions@v2
+    with:
+      mode: both
 ```
 
-Set `original` and `modified` together for an explicit pair. Other controls and
+Set `original` and `modified` together for an explicit pair. With `mode: latest`,
+`modified` alone can select a document to render without an original. Other controls and
 outputs are documented in [action.yml](action.yml). `manifest.json` records every
-file's status, output paths, and compared commits. `html-preview: 'true'` makes
-rendering failures fail the run while retaining results for other documents.
-The reusable workflow enables this mode and renders one-sided snapshots.
+file's status, mode, generated paths, and source commits. `html-preview: 'true'`
+makes rendering failures fail the run while preserving other file results.
+The reusable workflow requires HTML and enables one-sided snapshots.
 
-The tested defaults pin Python-Redlines and its Docxodus engine wheel to 1.0.0,
-and Docx2Html to 12.1.0. Comparison logic stays in those released dependencies;
-this repository owns the GitHub integration and viewer.
+Tested dependencies are Python-Redlines and its Docxodus engine wheel at 1.0.0,
+and Docx2Html at 12.1.0. This repository owns the GitHub integration and viewer.
 
 ## Execution and permissions
 
-`pull_request_target` runs the workflow from the trusted base repository. The
-comparison job has read-only repository access. It reads the head's DOCX blobs
-with Git; it never checks out or executes PR code. This also works for fork PRs.
-The publishing job uses the same revision of this repository as the called
-workflow, downloads only artifacts from that caller's review workflow, validates
-their metadata and paths, and renders them with scripts and external requests
-disabled. Only the final deployment/comment steps use publishing credentials.
+`pull_request_target` uses trusted base-repository code. The comparison job has
+read-only repository access and reads PR Word blobs with Git; it never executes
+PR code. The review job uses the called workflow's exact implementation revision,
+accepts artifacts only from that caller's trusted review workflow, validates their
+metadata and paths, and disables scripts and external requests in document HTML.
 
-Keep that event and the reusable job intact. Don't add steps that execute the PR
-head in a privileged workflow. Existing GitHub Pages environment protection
-rules still apply; allow your default branch to deploy. Repository policies may
-also restrict the requested `GITHUB_TOKEN` permissions.
+The review job inherits the caller's permissions. The default caller grants no
+Pages or OIDC access. Pages users explicitly add both permissions; disabling
+comments also permits omitting `pull-requests: write` in favor of read access.
+Keep the trusted event and job structure intact; do not execute PR-head scripts
+in a privileged workflow. This installation targets GitHub.com and GitHub-hosted
+Ubuntu runners.
 
 ## Development
 
@@ -163,7 +252,6 @@ pytest -q
 python tests/browser_smoke.py
 ```
 
-Tests cover real engine comparisons, multiple documents and duplicate basenames,
-snapshot handling, contextual rendering, safe HTML serialization, artifact
-validation, and comment updates. MIT licensed; see [NOTICE.md](NOTICE.md) for
-the original action and demo attribution.
+Tests cover real comparisons, latest-only rendering, multiple files and renames,
+inline controls, context, comment size limits, artifact provenance, Pages site
+ownership, and browser navigation. MIT licensed; see [NOTICE.md](NOTICE.md).

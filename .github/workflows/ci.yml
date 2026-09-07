@@ -27,6 +27,7 @@ jobs:
           original: tests/fixtures/original.docx
           modified: tests/fixtures/modified.docx
           html-preview: 'true'
+          mode: both
       - name: Check real action outputs
         env:
           MANIFEST: ${{ steps.redline.outputs.manifest }}
@@ -40,4 +41,35 @@ jobs:
           assert result['redline'] and result['html'] and not result['error'], result
           html = ET.parse(str(manifest.parent / result['html']))
           assert html.xpath('//*[local-name()="ins" or local-name()="del"]')
+          assert result['latest'] and result['latest_html'], result
+          latest = ET.parse(str(manifest.parent / result['latest_html']))
+          assert not latest.xpath('//*[local-name()="ins" or local-name()="del"]')
+          assert (manifest.parent / result['latest']).read_bytes() == Path('tests/fixtures/modified.docx').read_bytes()
+          PY
+      - name: Render only the latest version of a document containing tracked changes
+        id: latest
+        uses: ./
+        with:
+          original: tests/fixtures/original.docx
+          modified: tests/fixtures/expected_redline.docx
+          mode: latest
+          html-preview: 'true'
+          output-dir: latest-review
+          artifact-name: docx-latest
+      - name: Verify latest-only output
+        env:
+          MANIFEST: ${{ steps.latest.outputs.manifest }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from lxml import etree as ET
+          manifest = Path(os.environ['MANIFEST'])
+          data = json.loads(manifest.read_text())
+          [result] = data['files']
+          assert data['mode'] == 'latest'
+          assert result['redline'] is None and result['revisions'] is None
+          assert result['latest'] and result['latest_html'] and not result['error']
+          latest = ET.parse(str(manifest.parent / result['latest_html']))
+          assert not latest.xpath('//*[local-name()="ins" or local-name()="del"]')
           PY

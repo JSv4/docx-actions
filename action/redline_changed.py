@@ -57,6 +57,8 @@ class Change:
     redline: Optional[str] = None
     html: Optional[str] = None
     document: Optional[str] = None   # one-sided snapshot, not a tracked-changes redline
+    latest: Optional[str] = None
+    latest_html: Optional[str] = None
     error: Optional[str] = None
 
     def to_dict(self) -> Dict:
@@ -68,6 +70,8 @@ class Change:
             'redline': self.redline,
             'html': self.html,
             'document': self.document,
+            'latest': self.latest,
+            'latest_html': self.latest_html,
             'error': self.error,
         }
 
@@ -87,6 +91,7 @@ class Inputs:
     html_preview: str = 'auto'
     write_summary: bool = True
     render_unpaired: bool = False
+    mode: str = 'redline'
     raw: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -114,18 +119,21 @@ class Inputs:
             html_preview=(get('html-preview') or 'auto').lower(),
             write_summary=get_bool('summary', True),
             render_unpaired=get_bool('render-unpaired', False),
+            mode=get('mode', 'redline').lower(),
         )
         inputs.raw = {k: v for k, v in env.items() if k.startswith('INPUT_')}
         inputs.validate()
         return inputs
 
     def validate(self) -> None:
+        if self.mode not in ('redline', 'latest', 'both'):
+            raise ConfigError("Input 'mode' must be redline, latest, or both.")
         if self.engine not in ENGINES:
             raise ConfigError(f"Input 'engine' must be one of {ENGINES}, got '{self.engine}'")
         if self.html_preview not in HTML_PREVIEW_MODES:
             raise ConfigError(
                 f"Input 'html-preview' must be one of {HTML_PREVIEW_MODES}, got '{self.html_preview}'")
-        if bool(self.original) != bool(self.modified):
+        if bool(self.original) != bool(self.modified) and not (self.mode == 'latest' and self.modified):
             raise ConfigError(
                 "Inputs 'original' and 'modified' must be provided together "
                 "(explicit-pair mode) or both left empty (auto-detect mode).")
@@ -328,9 +336,9 @@ def resolve_previewer(inputs: Inputs) -> Optional[str]:
     return None
 
 
-def generate_preview(previewer: str, redline_path: Path, html_path: Path) -> bool:
+def generate_preview(previewer: str, redline_path: Path, html_path: Path, track_changes=True) -> bool:
     result = subprocess.run(
-        [previewer, str(redline_path), str(html_path), '--track-changes'],
+        [previewer, str(redline_path), str(html_path)] + (['--track-changes'] if track_changes else []),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
     if result.returncode != 0:
         output = result.stdout.decode('utf-8', 'replace').strip()
@@ -385,6 +393,21 @@ def render_snapshot(inputs: Inputs, change: Change, data: bytes,
         change.error = 'Required HTML preview could not be generated.'
 
 
+def render_latest(inputs: Inputs, change: Change, data: bytes,
+                  previewer: Optional[str]) -> None:
+    """Render the head blob directly; never run the comparison engine in latest mode."""
+    redline, _ = redline_output_paths(inputs.output_dir, change.path)
+    document_path = redline.with_name(redline.name.removesuffix('.redline.docx') + '.latest.docx')
+    html_path = document_path.with_suffix('.html')
+    document_path.parent.mkdir(parents=True, exist_ok=True)
+    document_path.write_bytes(data)
+    change.latest = document_path.as_posix()
+    if previewer and generate_preview(previewer, document_path, html_path, False):
+        change.latest_html = html_path.as_posix()
+    elif previewer and inputs.html_preview == 'true':
+        change.error = 'Required latest-version HTML preview could not be generated.'
+
+
 # --------------------------------------------------------------------------
 # reporting
 # --------------------------------------------------------------------------
@@ -398,8 +421,8 @@ STATUS_LABELS = {
 }
 
 
-def build_summary(changes: List[Change], base: Optional[str], head: Optional[str]) -> str:
-    lines = ['## 📕 DOCX redlines', '']
+def build_summary(changes: List[Change], base: Optional[str], head: Optional[str], mode='redline') -> str:
+    lines = ['## 📕 DOCX latest versions' if mode == 'latest' else '## 📕 DOCX redlines', '']
     if base and head:
         lines.append(f'Compared `{base[:12]}` → `{head[:12]}`.')
         lines.append('')
@@ -414,10 +437,12 @@ def build_summary(changes: List[Change], base: Optional[str], head: Optional[str
         if c.previous_path:
             name = f'`{c.previous_path}` → `{c.path}`'
         revisions = str(c.revisions) if c.revisions is not None else '—'
-        redline = f'`{c.redline}`' if c.redline else '—'
+        document = c.redline or c.latest or c.document
+        redline = f'`{document}`' if document else '—'
         if c.error:
             redline = '⚠️ failed'
-        html = f'`{c.html}`' if c.html else '—'
+        preview = c.html or c.latest_html
+        html = f'`{preview}`' if preview else '—'
         lines.append(f'| {name} | {STATUS_LABELS[c.status]} | {revisions} | {redline} | {html} |')
 
     if any(c.redline for c in changes):
@@ -436,7 +461,7 @@ def append_to_file(env_var: str, content: str, env: Dict[str, str]) -> None:
 
 
 def write_outputs(changes: List[Change], env: Dict[str, str]) -> None:
-    generated = [c for c in changes if c.redline]
+    generated = [c for c in changes if c.redline or c.latest or c.document]
     payload = json.dumps([c.to_dict() for c in changes], separators=(',', ':'))
     content = (
         f'count={len(generated)}\n'
@@ -453,7 +478,7 @@ def write_manifest(changes: List[Change], inputs: Inputs, base: Optional[str],
     directory.mkdir(parents=True, exist_ok=True)
     records = [c.to_dict() for c in changes]
     for record in records:
-        for field in ('redline', 'html', 'document'):
+        for field in ('redline', 'html', 'document', 'latest', 'latest_html'):
             if record[field]:
                 record[field] = Path(record[field]).resolve().relative_to(directory).as_posix()
     event = load_event(env)
@@ -461,7 +486,7 @@ def write_manifest(changes: List[Change], inputs: Inputs, base: Optional[str],
     manifest.write_text(json.dumps({
         'schema_version': 1, 'repository': env.get('GITHUB_REPOSITORY'),
         'pr': event.get('pull_request', {}).get('number'),
-        'base_sha': base, 'head_sha': head, 'files': records,
+        'base_sha': base, 'head_sha': head, 'mode': inputs.mode, 'files': records,
     }, indent=2) + '\n', encoding='utf-8')
     append_to_file('GITHUB_OUTPUT', f'manifest={manifest.as_posix()}\n', env)
 
@@ -483,16 +508,18 @@ def main(env: Dict[str, str]) -> int:
     previewer = resolve_previewer(inputs)
     base = head = None
 
-    if inputs.original:  # explicit-pair mode
+    if inputs.original or inputs.modified:  # explicit pair, or a latest-only document
         for label, candidate in (('original', inputs.original), ('modified', inputs.modified)):
-            if not os.path.isfile(candidate):
+            if candidate and not os.path.isfile(candidate):
                 raise ConfigError(f"Input '{label}' file not found: {candidate}")
-        changes = [Change(path=inputs.modified, previous_path=inputs.original, status='explicit')]
-        engine = make_engine(inputs)
-        run_redline_pair(engine, inputs, changes[0],
-                         Path(inputs.original).read_bytes(),
-                         Path(inputs.modified).read_bytes(),
-                         previewer)
+        changes = [Change(path=inputs.modified, previous_path=inputs.original or None, status='explicit')]
+        if inputs.mode != 'latest':
+            engine = make_engine(inputs)
+            run_redline_pair(engine, inputs, changes[0],
+                             Path(inputs.original).read_bytes(),
+                             Path(inputs.modified).read_bytes(), previewer)
+        if inputs.mode in ('latest', 'both'):
+            render_latest(inputs, changes[0], Path(inputs.modified).read_bytes(), previewer)
     else:  # auto-detect mode
         event = load_event(env)
         base, head = resolve_refs(inputs, env, event)
@@ -501,10 +528,13 @@ def main(env: Dict[str, str]) -> int:
         comparable = [c for c in changes if c.status in ('modified', 'renamed')]
         print(f'Found {len(changes)} changed .docx file(s) between '
               f'{base[:12]} and {head[:12]}; {len(comparable)} comparable.')
-        engine = make_engine(inputs) if comparable else None
+        engine = make_engine(inputs) if comparable and inputs.mode != 'latest' else None
         for change in changes:
             try:
-                if change.status in ('modified', 'renamed'):
+                if inputs.mode == 'latest':
+                    if change.status != 'deleted':
+                        render_latest(inputs, change, read_blob(head, change.path), previewer)
+                elif change.status in ('modified', 'renamed'):
                     original = read_blob(base, change.previous_path or change.path)
                     modified = read_blob(head, change.path)
                     run_redline_pair(engine, inputs, change, original, modified, previewer)
@@ -513,6 +543,8 @@ def main(env: Dict[str, str]) -> int:
                 elif inputs.render_unpaired:
                     commit = base if change.status == 'deleted' else head
                     render_snapshot(inputs, change, read_blob(commit, change.path), previewer)
+                if inputs.mode == 'both' and change.status != 'deleted':
+                    render_latest(inputs, change, read_blob(head, change.path), previewer)
             except (OSError, subprocess.SubprocessError) as exc:
                 change.error = str(exc)
                 print(f'::error::Could not process {change.path}: {exc}')
@@ -521,7 +553,7 @@ def main(env: Dict[str, str]) -> int:
     write_outputs(changes, env)
     write_manifest(changes, inputs, base, head, env)
     if inputs.write_summary:
-        append_to_file('GITHUB_STEP_SUMMARY', build_summary(changes, base, head), env)
+        append_to_file('GITHUB_STEP_SUMMARY', build_summary(changes, base, head, inputs.mode), env)
 
     failed = [c for c in changes if c.error]
     if failed:

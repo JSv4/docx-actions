@@ -9,7 +9,10 @@ import re
 import stat
 import subprocess
 from urllib.parse import quote
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
 import zipfile
+from options import Options
 
 
 def api(path, payload=None, method=None):
@@ -89,7 +92,7 @@ def validate_manifest(manifest, repo, pr_number):
         paths.add(record['path'])
         if record.get('status') not in ('modified', 'renamed', 'added', 'deleted', 'explicit'):
             raise ValueError('Invalid document status')
-        for field in ('redline', 'html', 'document'):
+        for field in ('redline', 'html', 'document', 'latest', 'latest_html'):
             value = record.get(field)
             if value:
                 path = PurePosixPath(value)
@@ -99,6 +102,7 @@ def validate_manifest(manifest, repo, pr_number):
 
 def collect(destination):
     repo = os.environ['GITHUB_REPOSITORY']
+    mode = Options.from_env().mode
     current_run = api(f"repos/{repo}/actions/runs/{int(os.environ['GITHUB_RUN_ID'])}")
     pulls = list(pages(f'repos/{repo}/pulls?state=open&per_page=100'))
     catalog = []
@@ -123,6 +127,8 @@ def collect(destination):
             extract_artifact(data, source)
             manifest = json.loads((source / 'manifest.json').read_text())
             validate_manifest(manifest, repo, number)
+            if manifest.get('mode', 'redline') != mode:
+                continue
             catalog.append({'pr': number, 'title': pr['title'], 'sha': manifest['head_sha'],
                             'current_head': pr['head']['sha'], 'pr_url': pr['html_url'],
                             'run_url': run['html_url'], 'input_dir': str(source)})
@@ -134,7 +140,7 @@ def collect(destination):
 MARKER = re.compile(r'^<!-- docx-redlines-preview:(index|[0-9a-f]{20}) -->')
 
 
-def post(comments_path, base_url):
+def post(comments_path, base_url='', artifact_url=''):
     repo = os.environ['GITHUB_REPOSITORY']
     for preview in json.loads(comments_path.read_text()):
         number = int(preview['pr'])
@@ -158,6 +164,11 @@ def post(comments_path, base_url):
         if preview['file_count'] == 0 and not owned:
             continue
         body = preview['body']
+        placeholder = 'https://docx-actions.invalid/review-artifact'
+        if placeholder in body:
+            if not artifact_url.startswith(f'https://github.com/{repo}/actions/runs/'):
+                raise ValueError('The uploaded review artifact URL is required before commenting')
+            body = body.replace(placeholder, artifact_url)
         if len(body) > 60000 or not body.startswith('<!-- docx-redlines-preview:index -->'):
             raise ValueError('Invalid generated comment')
         # Keep the original summary URL, including when migrating from the
@@ -177,9 +188,62 @@ def post(comments_path, base_url):
             if not current():
                 break
             api(f"repos/{repo}/issues/comments/{comment['id']}", method='DELETE')
-    if os.environ.get('GITHUB_STEP_SUMMARY'):
+    if os.environ.get('GITHUB_STEP_SUMMARY') and Options.from_env().summary:
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as handle:
-            handle.write(f'\n## Word document review\n\n[Open the browser viewer]({base_url})\n')
+            handle.write('\n## Word document review\n\n')
+            if base_url:
+                handle.write(f'[Open the browser viewer]({base_url})\n\n')
+            if artifact_url:
+                handle.write(f'[Download the complete review]({artifact_url})\n')
+
+
+def read_site(url):
+    try:
+        with urlopen(url, timeout=30) as response:
+            return response.read(1_000_000).decode('utf-8')
+    except HTTPError as error:
+        if error.code == 404:
+            return None
+        raise RuntimeError('Cannot verify ownership of the existing Pages site') from error
+    except (URLError, UnicodeError) as error:
+        raise RuntimeError('Cannot verify ownership of the existing Pages site') from error
+
+
+def check_pages(allow_overwrite=False):
+    """Only publish over an empty site or an identifiable DOCX Actions site."""
+    repo = os.environ['GITHUB_REPOSITORY']
+    site = api(f'repos/{repo}/pages')
+    if allow_overwrite:
+        print('Explicitly authorized replacement of this repository\'s Pages site.')
+        return
+    url = site['html_url'].rstrip('/')
+    if not url.startswith('https://'):
+        raise ValueError('Pages must use HTTPS before its ownership can be verified')
+    marker = read_site(url + '/docx-actions-site.json')
+    if marker:
+        try:
+            identity = json.loads(marker)
+        except ValueError:
+            identity = {}
+        if isinstance(identity, dict) and identity.get('generator') == 'JSv4/docx-actions' and identity.get('repository', '').lower() == repo.lower():
+            return
+        raise RuntimeError('The existing Pages ownership marker does not match this repository. '
+                           'No deployment was made; allow-pages-overwrite is required to replace it.')
+    landing = read_site(url + '/')
+    # The first release predates the ownership marker. Recognize its exact
+    # generated landing page so existing consumers can opt in without an override.
+    if landing and all(part in landing for part in (
+        '<title>Word document previews · DOCX review</title>',
+        'Generated with Python-Redlines and Docxodus. Each comparison identifies its source commit.',
+        'WORD DOCUMENT REVIEW · GITHUB ACTIONS',
+    )):
+        return
+    deployments = api(f'repos/{repo}/deployments?environment=github-pages&per_page=1')
+    if landing is None and marker is None and not deployments and site.get('status') != 'built':
+        return
+    raise RuntimeError('Pages already contains a site that DOCX Actions does not own. '
+                       'No deployment was made. Keep pages: false, or explicitly set '
+                       'allow-pages-overwrite: true to replace the entire site.')
 
 
 if __name__ == '__main__':
@@ -192,11 +256,16 @@ if __name__ == '__main__':
     gather.add_argument('--output', type=Path, default=Path('_preview_inputs'))
     publish = commands.add_parser('post')
     publish.add_argument('--comments', type=Path, default=Path('_preview_comments.json'))
-    publish.add_argument('--base-url', required=True)
+    publish.add_argument('--base-url', default='')
+    publish.add_argument('--artifact-url', default='')
+    guard = commands.add_parser('check-pages')
+    guard.add_argument('--allow-overwrite', action='store_true')
     args = parser.parse_args()
     if args.command == 'context':
         context(args.pr, args.output)
     elif args.command == 'collect':
         collect(args.output)
+    elif args.command == 'post':
+        post(args.comments, args.base_url, args.artifact_url)
     else:
-        post(args.comments, args.base_url)
+        check_pages(args.allow_overwrite)

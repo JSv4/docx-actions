@@ -8,6 +8,10 @@ branding:
   color: 'red'
 
 inputs:
+  mode:
+    description: 'Document output: redline (default), latest (no comparison), or both.'
+    required: false
+    default: 'redline'
   working-directory:
     description: 'Directory containing the Git repository and documents.'
     required: false
@@ -20,7 +24,7 @@ inputs:
     required: false
     default: ''
   modified:
-    description: 'Path to the modified .docx for explicit-pair mode.'
+    description: 'Path to the modified .docx. In latest mode this can be supplied without original.'
     required: false
     default: ''
   files:
@@ -103,7 +107,7 @@ outputs:
     description: 'Path to manifest.json, containing every file result and the compared commits.'
     value: ${{ steps.redline.outputs.manifest }}
   count:
-    description: 'Number of redline documents generated.'
+    description: 'Number of files with generated redlines or document snapshots.'
     value: ${{ steps.redline.outputs.count }}
   any-changes:
     description: >-
@@ -130,6 +134,7 @@ runs:
         update-environment: false
 
     - name: Install python-redlines
+      if: ${{ inputs.mode != 'latest' }}
       shell: bash
       env:
         INPUT_ENGINE: ${{ inputs.engine }}
@@ -186,6 +191,7 @@ runs:
         INPUT_HTML_PREVIEW: ${{ inputs.html-preview }}
         INPUT_SUMMARY: ${{ inputs.summary }}
         INPUT_RENDER_UNPAIRED: ${{ inputs.render-unpaired }}
+        INPUT_MODE: ${{ inputs.mode }}
       run: |
         cd "${INPUT_WORKING_DIRECTORY}"
         "${{ steps.python.outputs.python-path }}" "${GITHUB_ACTION_PATH}/action/redline_changed.py"

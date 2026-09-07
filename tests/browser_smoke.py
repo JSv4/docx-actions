@@ -16,6 +16,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'action/preview'))
 from render import build, file_key
+from options import Options
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -41,19 +42,21 @@ def main():
         for path, status in [('one/contract.docx', 'modified'), ('two/contract.docx', 'modified'), ('added.docx', 'added')]:
             key = file_key(path)
             (source / f'{key}.html').write_text(source_html)
+            (source / f'{key}.latest.html').write_text('<html xmlns="http://www.w3.org/1999/xhtml"><head/><body><p>Current contract.</p><p>Notice within 45 days.</p></body></html>')
             shutil.copyfile(ROOT / 'tests/fixtures/modified.docx', source / f'{key}.docx')
             files.append({'path': path, 'status': status, 'previous_path': None, 'revisions': 4,
                           'redline': f'{key}.docx' if status == 'modified' else None,
                           'document': f'{key}.docx' if status == 'added' else None,
+                          'latest': f'{key}.docx', 'latest_html': f'{key}.latest.html',
                           'html': f'{key}.html', 'error': None})
-        (source / 'manifest.json').write_text(json.dumps({'files': files}))
+        (source / 'manifest.json').write_text(json.dumps({'mode': 'both', 'files': files}))
         sha = 'a' * 40
         catalog = directory / 'catalog.json'
         catalog.write_text(json.dumps([{'pr': 1, 'title': 'Review three Word documents', 'sha': sha,
             'current_head': sha, 'input_dir': str(source), 'pr_url': 'https://github.com/o/r/pull/1',
             'run_url': 'https://github.com/o/r/actions/runs/1'}]))
         comments = directory / 'comments.json'
-        build(catalog, output, 'https://o.github.io/r', comments)
+        build(catalog, output, 'https://o.github.io/r', comments, Options(mode='both', pages=True))
         [review] = json.loads(comments.read_text())
         assert review['file_count'] == 3
         assert review['body'].count('[View redline]') == 2
@@ -89,6 +92,14 @@ def main():
                 page.wait_for_function("document.getElementById('position').textContent.startsWith('2 of')")
                 page.goto(address + '#review-change-3')
                 page.wait_for_function("document.getElementById('position').textContent.startsWith('3 of')")
+                page.get_by_role('link', name='Latest version', exact=True).click()
+                page.wait_for_function("document.getElementById('position').textContent.startsWith('1 of')")
+                assert page.frame_locator('#document').locator('body').inner_text().startswith('Current contract.')
+                assert page.frame_locator('#document').locator('ins, del').count() == 0
+                page.get_by_role('button', name='Next passage', exact=True).click()
+                assert page.url.endswith('#review-passage-2')
+                page.get_by_role('link', name='View redline', exact=True).click()
+                page.wait_for_function("document.getElementById('position').textContent.startsWith('1 of')")
                 page.set_viewport_size({'width': 390, 'height': 844})
                 page.wait_for_timeout(250)
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')

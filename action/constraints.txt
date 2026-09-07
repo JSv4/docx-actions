@@ -1,0 +1,2 @@
+# Match the tested wrapper and companion engine wheel.
+python-redlines-docxodus==1.0.0

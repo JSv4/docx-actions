@@ -1,0 +1,143 @@
+name: Automatic Word document review
+
+on:
+  workflow_call:
+    inputs:
+      files:
+        description: Optional newline-separated file globs. All DOCX files by default.
+        type: string
+        default: '**/*.docx'
+      pull-request:
+        description: Pull request number for a manual comparison; automatic on PR events.
+        type: number
+        default: 0
+      publish:
+        description: Deploy to this repository's Pages site and update PR comments.
+        type: boolean
+        default: true
+
+jobs:
+  compare:
+    if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && inputs.pull-request > 0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out this action's implementation at the workflow's exact revision
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .docx-actions
+          persist-credentials: false
+      - name: Read the pull request
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pull-request }}
+        run: python .docx-actions/action/preview/github.py context --pr "$PR_NUMBER" --output "$RUNNER_TEMP/docx-context"
+      - name: Check out the base repository for Git object access
+        if: steps.context.outputs.open == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.context.outputs.base }}
+          path: .documents
+          fetch-depth: 0
+          # Read-only token. No PR code is checked out or executed.
+          persist-credentials: true
+      - name: Fetch the PR head as Git data
+        if: steps.context.outputs.open == 'true'
+        working-directory: .documents
+        env:
+          PR_NUMBER: ${{ steps.context.outputs.pr }}
+        run: git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
+      - name: Compare every changed Word document
+        if: steps.context.outputs.open == 'true'
+        id: compare
+        uses: ./.docx-actions
+        with:
+          working-directory: .documents
+          files: ${{ inputs.files }}
+          output-dir: ${{ github.workspace }}/redlines
+          html-preview: 'true'
+          render-unpaired: 'true'
+          detect-moves: 'true'
+          upload-artifact: 'false'
+      - name: Preserve every file result, including failures and empty comparisons
+        if: always() && steps.context.outputs.open == 'true' && hashFiles('redlines/manifest.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: docx-actions-pr-${{ steps.context.outputs.pr }}
+          path: redlines
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
+  preview:
+    needs: compare
+    if: always() && !cancelled() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+      pull-requests: write
+    concurrency:
+      group: docx-actions-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Check out the trusted preview implementation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .docx-actions
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the preview renderer
+        run: |
+          python -m pip install lxml==6.0.2 playwright==1.58.0
+          python -m playwright install --with-deps chromium
+      - name: Read comparison artifacts for open pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .docx-actions/action/preview/github.py collect
+      - uses: actions/configure-pages@v5
+        if: inputs.publish
+        id: pages
+      - name: Build contextual images and full document viewers
+        env:
+          PAGES_URL: ${{ steps.pages.outputs.base_url || format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+        run: python .docx-actions/action/preview/render.py --base-url "$PAGES_URL"
+      - name: Preserve the generated site for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: docx-review-site
+          path: |
+            _site
+            _preview_comments.json
+          if-no-files-found: error
+          overwrite: true
+      - uses: actions/upload-pages-artifact@v4
+        if: inputs.publish
+        with:
+          path: _site
+      - name: Deploy browser views and inline images
+        if: inputs.publish
+        id: deploy
+        uses: actions/deploy-pages@v4
+      - name: Update each document's PR comment after deployment
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_URL: ${{ steps.pages.outputs.base_url }}
+        run: python .docx-actions/action/preview/github.py post --base-url "$PAGES_URL"

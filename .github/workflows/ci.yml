@@ -1,0 +1,43 @@
+name: Test DOCX Actions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest -q
+      - run: python tests/browser_smoke.py
+      - name: Exercise the installed composite action and HTML renderer
+        id: redline
+        uses: ./
+        with:
+          original: tests/fixtures/original.docx
+          modified: tests/fixtures/modified.docx
+          html-preview: 'true'
+      - name: Check real action outputs
+        env:
+          MANIFEST: ${{ steps.redline.outputs.manifest }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from lxml import etree as ET
+          manifest = Path(os.environ['MANIFEST'])
+          [result] = json.loads(manifest.read_text())['files']
+          assert result['redline'] and result['html'] and not result['error'], result
+          html = ET.parse(str(manifest.parent / result['html']))
+          assert html.xpath('//*[local-name()="ins" or local-name()="del"]')
+          PY

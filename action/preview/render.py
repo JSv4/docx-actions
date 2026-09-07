@@ -151,9 +151,6 @@ def contextual_excerpt(change, index, total):
         ET.SubElement(section, H + "div", {"class": "excerpt-label"}).text = label
         window = ET.SubElement(section, H + "div", {"class": "excerpt-window"})
         append_block(window, node)
-    footer = ET.SubElement(card, H + "footer", {"class": "excerpt-footer"})
-    ET.SubElement(footer, H + "span", {"class": "excerpt-hint"}).text = "Continue reading with all surrounding text."
-    ET.SubElement(footer, H + "span", {"class": "excerpt-expand"}).text = "⤢ Expand in full document ↗"
     return root
 
 
@@ -221,42 +218,97 @@ def status_label(record):
     return f"{record['revisions']} revisions" if record.get('revisions') is not None else 'Tracked changes'
 
 
-def file_comment(item, record, url, changes, images):
-    key = file_key(record['path'])
-    lines = [comment_marker(key), f"### Word redline: <code>{html.escape(record['path'])}</code>", '',
-             f"Compared commit `{item['sha'][:12]}` · [Action run]({item['run_url']})", '',
-             f"**{status_label(record)}**", '']
+def filename_markup(path):
+    # Keep unusual Git filenames from splitting Markdown table rows or adding
+    # markup. Full paths distinguish identical basenames in different folders.
+    escaped = html.escape(path).replace('|', '&#124;').replace('\n', '&#10;').replace('\r', '&#13;')
+    return f'<code>{escaped}</code>'
+
+
+def passage_list(changes, url, budget):
+    passages, size = [], 0
+    for change in changes:
+        passage = f"**{change['number']}. {change['kind']}** · [Open passage]({url}#{change['id']})\n\n<p>{change['markup']}</p>\n"
+        if size + len(passage) + 500 > budget:
+            break
+        passages.append(passage)
+        size += len(passage) + 1
+    if not passages:
+        return ''
+    label = f'Read all {len(changes)} changed passages directly in GitHub' if len(passages) == len(changes) else f'Read {len(passages)} of {len(changes)} changed passages'
+    lines = ['<details>', f'<summary>{label}</summary>', '', *passages]
+    if len(passages) < len(changes):
+        lines += [f'[Continue through all passages in the full viewer]({url})', '']
+    lines += ['</details>', '']
+    return '\n'.join(lines)
+
+
+def preview_section(document, opened=False, text_budget=0):
+    record, url = document['record'], document['url']
+    if not url or not record.get('redline'):
+        return ''
+    lines = ['<details open>' if opened else '<details>',
+             f"<summary>Preview changes: {filename_markup(record['path'])}</summary>", '']
     if record.get('previous_path'):
-        lines += [f"Previous path: <code>{html.escape(record['previous_path'])}</code>", '']
-    if record.get('error'):
-        lines += ['This document could not be rendered. See the action run for the error; other documents are listed separately.', '']
-    if not url:
-        return '\n'.join(lines)
-    lines += [f'**[View full document in your browser]({url})** · [Download Word]({url}redline.docx)', '']
-    if not record.get('redline'):
-        return '\n'.join(lines)
-    lines += ['Underlined text is inserted; struck text is deleted. Purple marks moved text in the images.', '',
-              f'Showing {len(images)} excerpts with surrounding text. The full viewer contains all {len(changes)} changed passages.', '']
-    for index, picture in enumerate(images, 1):
+        lines += [f"Previously {filename_markup(record['previous_path'])}.", '']
+    for index, picture in enumerate(document['images'], 1):
         link = f"{url}#{picture['anchor']}"
         lines += [f"[![{picture['kind']} change with preceding and following context]({url}{picture['name']})]({link})", '',
                   f'**[⤢ Expand excerpt {index} in full document ↗]({link})**', '']
-    # A separate bounded comment per file keeps one large document from hiding
-    # all subsequent files. Never claim a truncated list contains every passage.
-    passages, size = [], len('\n'.join(lines))
-    for change in changes:
-        passage = f"**{change['number']}. {change['kind']}** · [Open passage]({url}#{change['id']})\n\n<p>{change['markup']}</p>\n"
-        if size + len(passage) > 46000:
-            break
-        passages.append(passage)
-        size += len(passage)
+    if not document['images']:
+        lines += [f'[Review changes in the full document]({url})', '']
+    passages = passage_list(document['changes'], url, text_budget)
     if passages:
-        label = f'Read all {len(changes)} changed passages directly in GitHub' if len(passages) == len(changes) else f'Read {len(passages)} of {len(changes)} changed passages'
-        lines += ['<details>', f'<summary>{label}</summary>', '', *passages]
-        if len(passages) < len(changes):
-            lines += [f'[Continue through all passages in the full viewer]({url})', '']
-        lines += ['</details>', '']
+        lines += [passages, '']
+    lines += ['</details>', '']
     return '\n'.join(lines)
+
+
+def review_comment(item, documents, review_url, budget=58000):
+    """One summary and expandable previews, fairly bounded across documents."""
+    count = len(documents)
+    title = f"## Word document review · {count} document{'s' if count != 1 else ''}"
+    header = f"{comment_marker('index')}\n{title}\n\n[Review all documents ↗]({review_url})\n\n"
+    footer = f"\n<sub>Compared commit <code>{item['sha'][:12]}</code> · <a href=\"{html.escape(item['run_url'])}\">Action run</a></sub>\n"
+    if not documents:
+        return f"{comment_marker('index')}\n## Word document review\n\nNo changed Word documents.\n{footer}"
+    table = '| Document | Changes | Actions |\n|---|---|---|\n'
+    legend = '\n<sub>Underlined: inserted · Struck: deleted · Purple: moved</sub>\n\n'
+    rows, included = [], []
+    size = len(header + table + legend + footer) + 1000
+    # Reserve space for every included document's links and image previews
+    # before allocating the optional text passages. Very large PRs retain a
+    # complete browser index even when GitHub's comment limit is reached.
+    for document in documents:
+        record, url = document['record'], document['url']
+        status = {'added': 'Added', 'deleted': 'Deleted'}.get(record['status'], status_label(record))
+        if record.get('error'):
+            status = 'Failed'
+        if url:
+            label = 'View redline' if record.get('redline') else 'View document'
+            actions = f'[{label}]({url}) · [Word]({url}redline.docx)'
+        else:
+            actions = f"[See result]({review_url})"
+        row = f"| {filename_markup(record['path'])} | {status} | {actions} |\n"
+        minimum = preview_section(document, opened=count == 1)
+        if size + len(row) + len(minimum) > budget:
+            break
+        rows.append(row)
+        included.append(document)
+        size += len(row) + len(minimum)
+    notice = '' if len(included) == count else f'\nShowing {len(included)} of {count} documents here. [Review all {count} documents]({review_url}) in the complete index.\n'
+    sections = [preview_section(d, opened=count == 1) for d in included]
+    if not any(sections):
+        legend = ''
+    prefix = header + table + ''.join(rows) + notice + legend
+    remaining = budget - len(prefix + footer + ''.join(sections))
+    allocations = sum(bool(section) for section in sections)
+    share = max(0, remaining // max(allocations, 1))
+    sections = [preview_section(d, opened=count == 1, text_budget=share) for d in included]
+    body = prefix + ''.join(sections) + footer
+    if len(body) > budget:
+        raise ValueError('Review comment exceeds its size budget')
+    return body
 
 
 def build(catalog_path, output, base_url, comments_path):
@@ -282,7 +334,7 @@ def build(catalog_path, output, base_url, comments_path):
             if pr < 1:
                 raise ValueError('Invalid PR number')
             records = json.loads(artifact_file(source, 'manifest.json').read_text())['files']
-            links, entries = [], []
+            links, documents = [], []
             pr_relative = f'pr/{pr}/{item["sha"]}'
             pr_url = f'{base_url}/{pr_relative}/'
             for record in records:
@@ -309,19 +361,16 @@ def build(catalog_path, output, base_url, comments_path):
                     (directory / 'index.html').write_text(shell(record['path'], content, prefix), encoding='utf-8')
                 label = html.escape(record['path'])
                 links.append(f'<li><a href="file-{key}/">{label}</a> — {status_label(record)}</li>' if url else f'<li>{label} — {status_label(record)}</li>')
-                entries.append({'key': key, 'body': file_comment(item, record, url, changes, images)})
+                documents.append({'record': record, 'url': url, 'changes': changes, 'images': images})
             directory = output / pr_relative
             directory.mkdir(parents=True, exist_ok=True)
             file_list = '<ul>' + ''.join(links) + '</ul>' if links else '<p>No changed Word documents.</p>'
             content = f'<main class="landing"><h1>PR #{pr}: {html.escape(item["title"])}</h1><p>Compared commit {item["sha"][:12]} · {len(records)} documents</p>{file_list}<a href="{html.escape(item["pr_url"])}">Open pull request ↗</a></main>'
             (directory / 'index.html').write_text(shell(item['title'], content, '../../../'), encoding='utf-8')
             cards.append(f'<article class="card"><div class="card-content"><p class="eyebrow">Pull request #{pr}</p><h2>{html.escape(item["title"])}</h2><p>{len(records)} Word documents · commit {item["sha"][:12]}</p><a class="button" href="{pr_relative}/">Review documents ↗</a></div></article>')
-            index_body = f"{comment_marker('index')}\n## Word document review\n\nCompared commit `{item['sha'][:12]}` · **{len(records)} changed Word documents**\n\n[Open all documents in your browser]({pr_url}) · [Action run]({item['run_url']})\n\nEach document has its own preview comment below. Added and deleted documents are labeled as full-document views.\n"
-            if not records:
-                index_body = f"{comment_marker('index')}\n## Word document review\n\nNo changed Word documents at commit `{item['sha'][:12]}`.\n"
-            entries.insert(0, {'key': 'index', 'body': index_body})
             if item['sha'] == item['current_head']:
-                comments.append({'pr': pr, 'sha': item['sha'], 'comments': entries})
+                comments.append({'pr': pr, 'sha': item['sha'], 'file_count': len(records),
+                                 'body': review_comment(item, documents, pr_url)})
         browser.close()
     content = f'''<header class="toolbar"><a class="brand" href="./">DOCX <span>/ review</span></a></header>
 <main class="landing"><div class="hero"><p class="eyebrow">WORD DOCUMENT REVIEW · GITHUB ACTIONS</p><h1>Read the changes.<br>Keep the document.</h1><p class="intro">Review changed Word documents with contextual excerpts, full browser views, and native tracked changes.</p></div><div class="cards">{''.join(cards) or '<p>No open pull requests with document previews.</p>'}</div><footer>Generated with Python-Redlines and Docxodus. Each comparison identifies its source commit. Previews are retained while their source artifacts are available.</footer></main>'''

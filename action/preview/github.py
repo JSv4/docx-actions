@@ -12,11 +12,16 @@ from urllib.parse import quote
 import zipfile
 
 
-def api(path, payload=None):
+def api(path, payload=None, method=None):
     command = ['gh', 'api', path]
+    if method:
+        command += ['--method', method]
     if payload is not None:
-        command += ['--method', 'PATCH' if '/issues/comments/' in path else 'POST', '--input', '-']
-    return json.loads(subprocess.check_output(command, input=json.dumps(payload) if payload is not None else None, text=True))
+        if not method:
+            command += ['--method', 'PATCH' if '/issues/comments/' in path else 'POST']
+        command += ['--input', '-']
+    result = subprocess.check_output(command, input=json.dumps(payload) if payload is not None else None, text=True)
+    return json.loads(result) if result.strip() else None
 
 
 def pages(path, key=None):
@@ -133,46 +138,45 @@ def post(comments_path, base_url):
     repo = os.environ['GITHUB_REPOSITORY']
     for preview in json.loads(comments_path.read_text()):
         number = int(preview['pr'])
-        pr = api(f'repos/{repo}/pulls/{number}')
-        if pr['state'] != 'open' or pr['head']['sha'] != preview['sha']:
+
+        def current():
+            pr = api(f'repos/{repo}/pulls/{number}')
+            return pr['state'] == 'open' and pr['head']['sha'] == preview['sha']
+
+        if not current():
             continue
-        existing = {}
+        owned, summaries = [], []
         for comment in pages(f'repos/{repo}/issues/{number}/comments?per_page=100'):
             match = MARKER.match(comment.get('body') or '')
-            if match and comment['user']['login'] == 'github-actions[bot]':
-                existing[match[1]] = comment
-            elif (comment.get('body') or '').startswith('<!-- docxodus-inline-preview -->') and comment['user']['login'] == 'github-actions[bot]':
-                # Upgrade the original standalone demo's summary in place.
-                existing.setdefault('index', comment)
+            legacy = (comment.get('body') or '').startswith('<!-- docxodus-inline-preview -->')
+            if comment['user']['login'] == 'github-actions[bot]' and (match or legacy):
+                owned.append(comment)
+                if legacy or match[1] == 'index':
+                    summaries.append(comment)
         # Avoid commenting on every code-only PR. Update an existing review
         # when its final DOCX change disappears, so it cannot look current.
-        if len(preview['comments']) == 1 and not existing:
+        if preview['file_count'] == 0 and not owned:
             continue
-        active_keys = set()
-        for entry in preview['comments']:
-            key, body = entry['key'], entry['body']
-            if len(body) > 60000 or not body.startswith(f'<!-- docx-redlines-preview:{key} -->'):
-                raise ValueError('Invalid generated comment')
-            active_keys.add(key)
-            old = existing.get(key)
-            if old and old['body'] == body:
+        body = preview['body']
+        if len(body) > 60000 or not body.startswith('<!-- docx-redlines-preview:index -->'):
+            raise ValueError('Invalid generated comment')
+        # Keep the original summary URL, including when migrating from the
+        # demo's first comment format. Remove only our obsolete bot comments,
+        # and only after the complete replacement exists successfully.
+        summary = min(summaries, key=lambda c: c['id']) if summaries else None
+        if not summary or summary['body'] != body:
+            if not current():
                 continue
-            # Recheck before each write; a newer push must not acquire a stale
-            # preview when a large PR requires several API requests.
-            current = api(f'repos/{repo}/pulls/{number}')
-            if current['state'] != 'open' or current['head']['sha'] != preview['sha']:
+            endpoint = f"repos/{repo}/issues/comments/{summary['id']}" if summary else f'repos/{repo}/issues/{number}/comments'
+            result = api(endpoint, {'body': body})
+            if summary is None:
+                summary = result
+        for comment in owned:
+            if comment['id'] == summary['id']:
+                continue
+            if not current():
                 break
-            endpoint = f"repos/{repo}/issues/comments/{old['id']}" if old else f'repos/{repo}/issues/{number}/comments'
-            api(endpoint, {'body': body})
-        else:
-            for key, old in existing.items():
-                if key not in active_keys:
-                    current = api(f'repos/{repo}/pulls/{number}')
-                    if current['state'] != 'open' or current['head']['sha'] != preview['sha']:
-                        break
-                    body = f"<!-- docx-redlines-preview:{key} -->\nThis document is no longer changed in this pull request at commit `{preview['sha'][:12]}`.\n"
-                    if old['body'] != body:
-                        api(f"repos/{repo}/issues/comments/{old['id']}", {'body': body})
+            api(f"repos/{repo}/issues/comments/{comment['id']}", method='DELETE')
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as handle:
             handle.write(f'\n## Word document review\n\n[Open the browser viewer]({base_url})\n')

@@ -10,6 +10,7 @@ import sys
 from tempfile import TemporaryDirectory
 from threading import Thread
 
+from lxml import etree as ET
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,9 +55,12 @@ def main():
         comments = directory / 'comments.json'
         build(catalog, output, 'https://o.github.io/r', comments)
         [review] = json.loads(comments.read_text())
-        assert len(review['comments']) == 4
-        assert len({entry['key'] for entry in review['comments']}) == 4
-        assert 'Added document' in review['comments'][-1]['body']
+        assert review['file_count'] == 3
+        assert review['body'].count('[View redline]') == 2
+        assert '| Added | [View document]' in review['body']
+        markup = ET.HTML(review['body'])
+        assert len(markup.xpath('//details[summary[contains(., "Preview changes:")]]')) == 2
+        assert not markup.xpath('//details[@open]')
         images = list(output.rglob('preview-*.png'))
         assert len(images) == 4
         server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(output)))

@@ -15,6 +15,3 @@ body{max-width:760px!important;margin:0!important;padding:0!important;background
 .excerpt-before .excerpt-window>*{flex-shrink:0}
 .excerpt-before .excerpt-window[data-clipped]{mask-image:linear-gradient(transparent,#000 15px)}
 .excerpt-after .excerpt-window[data-clipped]{mask-image:linear-gradient(#000 calc(100% - 15px),transparent)}
-.excerpt-footer{padding:15px 23px;display:flex;justify-content:space-between;align-items:center;gap:16px;border-top:1px solid #dae4dc;font:11px/1.5 system-ui,sans-serif;color:#697d71}
-.excerpt-hint{max-width:310px}
-.excerpt-expand{display:inline-block;flex-shrink:0;padding:10px 14px;background:#185f54;border-radius:6px;font-size:12px;font-weight:650;color:white;white-space:nowrap}

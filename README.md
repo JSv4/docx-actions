@@ -50,15 +50,23 @@ GitHub-hosted Ubuntu runners.
   their previous path; a pure rename is labeled as unchanged content.
 - Added and deleted documents get full-document views, clearly labeled as
   one-sided snapshots rather than tracked-change comparisons.
-- Each document gets its own updatable PR comment. Text edits use insertions and
-  strikethroughs; two representative image excerpts include surrounding text and
-  **Expand in full document** links. A large contract cannot hide the other files.
+- One updatable PR comment lists the documents, revision counts, browser links,
+  and Word downloads. Contextual previews are collapsed for multiple documents;
+  a single-document PR opens its preview automatically. Each excerpt keeps its
+  surrounding text and one **Expand in full document** link.
 - The complete viewer has Previous/Next navigation, passage deep links, and a
   Word download. Long comments disclose truncation and link to every passage.
-- Pushing another edit updates the bot's existing comments. Comparisons identify
+- Pushing another edit updates the same bot comment. Comparisons identify
   their source commit, and a newer PR head prevents stale comments from posting.
+- Upgrading from the per-document layout preserves the summary comment's URL and
+  removes the obsolete comments owned by this action's bot after updating it.
+  Human comments and unrelated bot comments are retained.
 - Open PRs share one index; publishing one PR retains the others. Closing a PR
   removes it from the next site build. Code-only PRs don't get new preview comments.
+
+Long reviews share the comment space across documents; if GitHub's size limit
+requires shortening the inline content, the comment says so and links to the
+complete browser index. Every document is still compared and published.
 
 Previews are rebuilt from retained comparison artifacts (90 days by default).
 If an artifact expires, its preview disappears on the next rebuild. Manual runs

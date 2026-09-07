@@ -135,7 +135,7 @@ jobs:
         if: inputs.publish
         id: deploy
         uses: actions/deploy-pages@v4
-      - name: Update each document's PR comment after deployment
+      - name: Update the consolidated PR review comment after deployment
         if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}

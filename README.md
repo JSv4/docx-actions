@@ -14,7 +14,15 @@ Word files with native tracked changes. Powered by
 
 <a href="docs/media/docx-actions-walkthrough.mp4"><img src="docs/media/docx-actions-poster.png" alt="Watch DOCX Actions automatically review Word documents" width="480"></a>
 
-## Install once
+<a id="install-once"></a>
+
+## Install automatic PR reviews
+
+Use the reusable workflow below for the complete experience shown in the video:
+automatic discovery, one updating PR comment, contextual previews, and full
+browser redlines. The Marketplace step `uses: JSv4/docx-actions@v1` provides
+[comparison and artifacts](#comparison-without-publishing); the reusable
+workflow also handles Pages deployment and PR comments.
 
 Enable **Settings → Pages → Source: GitHub Actions**, then add
 `.github/workflows/docx-review.yml` to your default branch:
@@ -35,12 +43,13 @@ permissions:
 
 jobs:
   review:
-    uses: JSv4/docx-actions/.github/workflows/review.yml@main
+    uses: JSv4/docx-actions/.github/workflows/review.yml@v1
 ```
 
 That's the complete consumer workflow. No document paths, version pairs,
 Python scripts, browser setup, personal access token, or custom secrets are
-needed. Pin `@main` to a reviewed commit SHA for reproducible installations.
+needed. The `@v1` tag tracks compatible version 1 updates. Use `@v1.0.0` for
+the first release, or pin a reviewed commit SHA for reproducible installations.
 
 The workflow owns the repository's Pages site. Use a dedicated repository if
 you already publish a different website there. Pages visibility determines who
@@ -100,7 +109,7 @@ For example, an optional restriction is simply:
 ```yaml
 jobs:
   review:
-    uses: JSv4/docx-actions/.github/workflows/review.yml@main
+    uses: JSv4/docx-actions/.github/workflows/review.yml@v1
     with:
       files: 'contracts/**/*.docx'
 ```
@@ -115,7 +124,7 @@ steps:
   - uses: actions/checkout@v4
     with:
       fetch-depth: 0
-  - uses: JSv4/docx-actions@main
+  - uses: JSv4/docx-actions@v1
 ```
 
 Set `original` and `modified` together for an explicit pair. Other controls and

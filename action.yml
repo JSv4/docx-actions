@@ -1,8 +1,7 @@
 name: 'DOCX Actions'
 description: >-
-  Generate Word tracked-changes (redline) documents for .docx files changed in a
-  pull request or push — or for an explicit pair of files — using python-redlines.
-  Optionally renders browser-viewable HTML previews of each redline via Docxodus.
+  Automatically compare changed Word documents with Docxodus, generating
+  native tracked changes and browser redlines.
 author: 'JSv4'
 branding:
   icon: 'file-text'

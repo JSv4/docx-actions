@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:03,000
+Review Word docs right in GitHub.
+Automatic redlines. Real documents. One pull request.
+
+2
+00:00:03,000 --> 00:00:07,000
+Push Word files. Open a pull request.
+Three complete NVCA charters in this demo.
+
+3
+00:00:07,000 --> 00:00:13,000
+Every changed .docx. One clear review.
+All three files found automatically. No file list.
+
+4
+00:00:13,000 --> 00:00:21,000
+Open a preview. Keep the context.
+See what changed, with the text before and after.
+
+5
+00:00:21,000 --> 00:00:29,000
+Expand the redline. Follow every change.
+Full document in your browser. Previous / Next navigation.
+
+6
+00:00:29,000 --> 00:00:33,000
+Take the redline back to Word.
+Download a .docx with native tracked changes.
+
+7
+00:00:33,000 --> 00:00:39,000
+One workflow. Every Word document.
+Enable GitHub Pages once, then add this workflow.
+
+8
+00:00:39,000 --> 00:00:43,000
+Word docs. Ready for review.
+github.com/JSv4/docx-actions

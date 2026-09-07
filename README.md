@@ -8,6 +8,12 @@ Word files with native tracked changes. Powered by
 [Docxodus](https://github.com/JSv4/Docxodus) through
 [Python-Redlines](https://github.com/JSv4/Python-Redlines).
 
+**[Watch the 43-second walkthrough](docs/media/docx-actions-walkthrough.mp4)** ·
+[Download MP4](https://raw.githubusercontent.com/JSv4/docx-actions/main/docs/media/docx-actions-walkthrough.mp4) ·
+[Cover image and captions](docs/media/)
+
+<a href="docs/media/docx-actions-walkthrough.mp4"><img src="docs/media/docx-actions-poster.png" alt="Watch DOCX Actions automatically review Word documents" width="480"></a>
+
 ## Install once
 
 Enable **Settings → Pages → Source: GitHub Actions**, then add

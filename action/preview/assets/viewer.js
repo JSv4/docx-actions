@@ -20,10 +20,13 @@ function navigate(index) {
   next.disabled = select.selectedIndex === select.options.length - 1;
 }
 
-frame.addEventListener('load', () => {
+function navigateFromHash() {
   const initial = Array.from(select.options).findIndex(o => `#${o.value}` === location.hash);
   navigate(Math.max(initial, 0));
-});
+}
+
+frame.addEventListener('load', navigateFromHash);
+window.addEventListener('hashchange', navigateFromHash);
 select.addEventListener('change', () => navigate(select.selectedIndex));
 previous.addEventListener('click', () => navigate(select.selectedIndex - 1));
 next.addEventListener('click', () => navigate(select.selectedIndex + 1));

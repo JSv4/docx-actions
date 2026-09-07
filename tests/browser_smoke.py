@@ -83,6 +83,8 @@ def main():
                 assert page.url.endswith('#review-change-2')
                 page.reload()
                 page.wait_for_function("document.getElementById('position').textContent.startsWith('2 of')")
+                page.goto(address + '#review-change-3')
+                page.wait_for_function("document.getElementById('position').textContent.startsWith('3 of')")
                 page.set_viewport_size({'width': 390, 'height': 844})
                 page.wait_for_timeout(250)
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')

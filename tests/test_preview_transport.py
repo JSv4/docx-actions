@@ -51,7 +51,8 @@ def test_duplicate_basenames_have_distinct_comments_and_long_passages_are_bounde
     assert 'Continue through all passages' in comment
 
 
-def test_post_does_not_touch_user_comments_and_updates_existing_bot_comment(tmp_path, monkeypatch):
+@pytest.mark.parametrize('old_marker', ['<!-- docx-redlines-preview:index -->', '<!-- docxodus-inline-preview -->'])
+def test_post_does_not_touch_user_comments_and_updates_existing_bot_comment(tmp_path, monkeypatch, old_marker):
     monkeypatch.setenv('GITHUB_REPOSITORY', 'o/r')
     monkeypatch.delenv('GITHUB_STEP_SUMMARY', raising=False)
     body = '<!-- docx-redlines-preview:index -->\nnew preview'
@@ -59,7 +60,7 @@ def test_post_does_not_touch_user_comments_and_updates_existing_bot_comment(tmp_
     path.write_text(json.dumps([{'pr': 1, 'sha': 'a' * 40, 'comments': [{'key': 'index', 'body': body}]}]))
     monkeypatch.setattr(transport, 'pages', lambda endpoint: [
         {'id': 10, 'body': '<!-- docx-redlines-preview:index -->\nuser', 'user': {'login': 'human'}},
-        {'id': 11, 'body': '<!-- docx-redlines-preview:index -->\nold', 'user': {'login': 'github-actions[bot]'}},
+        {'id': 11, 'body': old_marker + '\nold', 'user': {'login': 'github-actions[bot]'}},
     ])
     writes = []
     def api(endpoint, payload=None):

@@ -141,6 +141,9 @@ def post(comments_path, base_url):
             match = MARKER.match(comment.get('body') or '')
             if match and comment['user']['login'] == 'github-actions[bot]':
                 existing[match[1]] = comment
+            elif (comment.get('body') or '').startswith('<!-- docxodus-inline-preview -->') and comment['user']['login'] == 'github-actions[bot]':
+                # Upgrade the original standalone demo's summary in place.
+                existing.setdefault('index', comment)
         # Avoid commenting on every code-only PR. Update an existing review
         # when its final DOCX change disappears, so it cannot look current.
         if len(preview['comments']) == 1 and not existing:
@@ -156,13 +159,17 @@ def post(comments_path, base_url):
                 continue
             # Recheck before each write; a newer push must not acquire a stale
             # preview when a large PR requires several API requests.
-            if api(f'repos/{repo}/pulls/{number}')['head']['sha'] != preview['sha']:
+            current = api(f'repos/{repo}/pulls/{number}')
+            if current['state'] != 'open' or current['head']['sha'] != preview['sha']:
                 break
             endpoint = f"repos/{repo}/issues/comments/{old['id']}" if old else f'repos/{repo}/issues/{number}/comments'
             api(endpoint, {'body': body})
         else:
             for key, old in existing.items():
                 if key not in active_keys:
+                    current = api(f'repos/{repo}/pulls/{number}')
+                    if current['state'] != 'open' or current['head']['sha'] != preview['sha']:
+                        break
                     body = f"<!-- docx-redlines-preview:{key} -->\nThis document is no longer changed in this pull request at commit `{preview['sha'][:12]}`.\n"
                     if old['body'] != body:
                         api(f"repos/{repo}/issues/comments/{old['id']}", {'body': body})

@@ -1,5 +1,7 @@
 # DOCX Actions
 
+[![Tests](https://github.com/JSv4/docx-actions/actions/workflows/ci.yml/badge.svg)](https://github.com/JSv4/docx-actions/actions/workflows/ci.yml)
+
 Automatically review **every changed Word document** in a GitHub pull request.
 Get contextual previews in the PR, a complete browser viewer, and downloadable
 Word files with native tracked changes. Powered by

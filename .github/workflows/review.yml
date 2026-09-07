@@ -90,7 +90,7 @@ jobs:
       group: docx-actions-pages
       cancel-in-progress: false
     environment:
-      name: github-pages
+      name: ${{ inputs.publish && 'github-pages' || 'docx-preview-build' }}
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - name: Check out the trusted preview implementation

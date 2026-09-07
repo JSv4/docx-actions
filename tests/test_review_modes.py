@@ -115,7 +115,7 @@ def test_pages_ownership_check(site_kind, monkeypatch):
             raise RuntimeError('Cannot verify ownership')
         if site_kind in ('owned', 'different-repo') and url.endswith('.json'):
             return json.dumps({'generator': 'JSv4/docx-actions', 'repository': 'o/r' if site_kind == 'owned' else 'other/repo'})
-        if site_kind == 'legacy' and not url.endswith('.json'):
+        if site_kind in ('legacy', 'different-repo') and not url.endswith('.json'):
             return '<title>Word document previews · DOCX review</title> WORD DOCUMENT REVIEW · GITHUB ACTIONS Generated with Python-Redlines and Docxodus. Each comparison identifies its source commit.'
         return '<html>My existing documentation</html>' if site_kind == 'unrelated' and not url.endswith('.json') else None
     monkeypatch.setattr(transport, 'read_site', read)

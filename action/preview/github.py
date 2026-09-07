@@ -227,6 +227,8 @@ def check_pages(allow_overwrite=False):
             identity = {}
         if isinstance(identity, dict) and identity.get('generator') == 'JSv4/docx-actions' and identity.get('repository', '').lower() == repo.lower():
             return
+        raise RuntimeError('The existing Pages ownership marker does not match this repository. '
+                           'No deployment was made; allow-pages-overwrite is required to replace it.')
     landing = read_site(url + '/')
     # The first release predates the ownership marker. Recognize its exact
     # generated landing page so existing consumers can opt in without an override.

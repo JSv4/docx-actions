@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'action/preview'))
-from render import build, file_key
+from render import build, file_key, IMAGE_URL
 from options import Options
 
 
@@ -111,6 +111,23 @@ def main():
             server.shutdown()
             server.server_close()
             thread.join()
+        # The same PNG renderer works with no Pages URL or deployment. Comments
+        # link to the published image for enlargement and keep their text logs.
+        branch_output = directory / 'branch-site'
+        build(catalog, branch_output, '', comments, Options(mode='both', image_host='branch'))
+        [review] = json.loads(comments.read_text())
+        assert 'github.io' not in review['body']
+        assert review['body'].count('Enlarge excerpt') == 4
+        assert 'Change log' in review['body'] and IMAGE_URL in review['body']
+        assert len(list(branch_output.rglob('preview-*.png'))) == 4
+        # Latest-only previews must be actual current text, without redline labels.
+        (source / 'manifest.json').write_text(json.dumps({'mode': 'latest', 'files': files}))
+        latest_output = directory / 'latest-site'
+        build(catalog, latest_output, '', comments, Options(mode='latest', image_host='branch'))
+        [review] = json.loads(comments.read_text())
+        assert len(list(latest_output.rglob('preview-*.png'))) == 6
+        assert review['body'].count('Latest version with preceding and following context') == 6
+        assert 'revisions' not in review['body'] and '<del>' not in review['body']
         print('Browser smoke test passed: 3 documents, context images, numbering, navigation, deep links, and mobile.')
 
 

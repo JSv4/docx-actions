@@ -13,7 +13,7 @@ import shutil
 
 from lxml import etree as ET
 from playwright.sync_api import sync_playwright
-from options import Options
+from options import IMAGE_URL, Options
 
 ROOT = Path(__file__).resolve().parent
 NS = {"h": "http://www.w3.org/1999/xhtml"}
@@ -156,7 +156,9 @@ def contextual_excerpt(change, index, total, context_paragraphs=1):
     card = ET.SubElement(body, H + "section", {"class": "review-excerpt"})
     header = ET.SubElement(card, H + "header", {"class": "excerpt-header"})
     ET.SubElement(header, H + "span").text = f"EXCERPT {index} OF {total}"
-    ET.SubElement(header, H + "strong").text = f"Passage {change['number']} · {change['kind']} change"
+    latest = change['kind'] == 'Latest'
+    kind = 'Latest version' if latest else f"{change['kind']} change"
+    ET.SubElement(header, H + "strong").text = f"Passage {change['number']} · {kind}"
     before = surrounding_blocks(change['node'], 'before', context_paragraphs)
     after = surrounding_blocks(change['node'], 'after', context_paragraphs)
     for label, nodes in [("Before", before), ("Changed passage", [change["node"]]), ("After", after)]:
@@ -164,7 +166,7 @@ def contextual_excerpt(change, index, total, context_paragraphs=1):
             continue
         role = "focus" if label == "Changed passage" else label.lower()
         section = ET.SubElement(card, H + "div", {"class": f"excerpt-section excerpt-{role}"})
-        ET.SubElement(section, H + "div", {"class": "excerpt-label"}).text = label
+        ET.SubElement(section, H + "div", {"class": "excerpt-label"}).text = 'Document passage' if latest and role == 'focus' else label
         window = ET.SubElement(section, H + "div", {"class": "excerpt-window"})
         for node in nodes:
             append_block(window, node)
@@ -174,6 +176,8 @@ def contextual_excerpt(change, index, total, context_paragraphs=1):
 def select_excerpts(changes, count):
     if not changes or not count:
         return []
+    if changes[0]['kind'] == 'Latest':
+        return changes[:count]
     # Prefer a dense text edit and a move to show distinct capabilities.
     ranked = sorted(changes, key=lambda c: len(c["node"].xpath(".//h:ins | .//h:del", namespaces=NS)), reverse=True)
     selected = [next((c for c in ranked if c["kind"] == "Text"), ranked[0])]
@@ -255,8 +259,9 @@ ARTIFACT_URL = 'https://docx-actions.invalid/review-artifact'
 
 
 def comment_size(value):
-    # Reserve room for the real Actions artifact URL before GitHub assigns it.
-    return len(value) + value.count(ARTIFACT_URL) * (256 - len(ARTIFACT_URL))
+    # Uploads assign the real artifact URL and immutable image commit later.
+    return len(value) + sum(value.count(marker) * (256 - len(marker))
+                            for marker in (ARTIFACT_URL, IMAGE_URL))
 
 
 def passage_list(changes, url, budget, max_passages=0, latest=False, downloads=True):
@@ -321,17 +326,20 @@ def preview_section(document, opened=False, text_budget=0, options=None):
     lines = ['<details open>' if opened else '<details>', f"<summary>{label} {filename_markup(record['path'])}</summary>", '']
     if record.get('previous_path'):
         lines += [f"Previously {filename_markup(record['previous_path'])}.", '']
-    if options.inline_preview and options.pages and options.mode != 'latest':
+    if options.images_enabled:
         for index, picture in enumerate(document['images'], 1):
-            link = f"{url}#{picture['anchor']}"
-            lines += [f"[![{picture['kind']} change with preceding and following context]({url}{picture['name']})]({link})", '',
-                      f'**[⤢ Expand excerpt {index} in full document ↗]({link})**', '']
+            image_url = picture.get('url') or f"{url}{picture['name']}"
+            link = f"{url}#{picture['anchor']}" if url else image_url
+            kind = 'Latest version' if picture['kind'] == 'Latest' else f"{picture['kind']} change"
+            expand = f'Expand excerpt {index} in full document' if url else f'Enlarge excerpt {index}'
+            lines += [f"[![{kind} with preceding and following context]({image_url})]({link})", '',
+                      f'**[⤢ {expand} ↗]({link})**', '']
     if text_budget < 600:
         return '\n'.join(lines + ['</details>', ''])
     latest_budget = text_budget // 3 if options.mode == 'both' and options.inline_preview else 0
     text_budget -= latest_budget
     used = 0
-    if options.inline_preview and not (options.pages and document['images']) and not latest:
+    if options.inline_preview and not (options.images_enabled and document['images']) and not latest:
         allowance = text_budget // 3 if options.change_log else text_budget
         candidates = select_excerpts(changes, options.preview_count) if changes and 'node' in changes[0] else changes[:options.preview_count]
         for change in candidates:
@@ -381,7 +389,7 @@ def review_comment(item, documents, review_url=None, budget=58000, options=None)
     if not documents:
         return f"{comment_marker('index')}\n## Word document review\n\nNo changed Word documents.\n{footer}"
     table = '| Document | Changes | Actions |\n|---|---|---|\n'
-    legend = '' if options.mode == 'latest' else '\n<sub>Underlined: inserted · Struck: deleted' + (' · Purple: moved' if options.pages else ' · Moves and formatting labeled in the change log') + '</sub>\n\n'
+    legend = '' if options.mode == 'latest' else '\n<sub>Underlined: inserted · Struck: deleted' + (' · Purple in images: moved' if options.images_enabled else ' · Moves and formatting labeled in the change log') + '</sub>\n\n'
     rows, included = [], []
     size = comment_size(header + table + legend + footer) + 1000
     for document in documents:
@@ -415,7 +423,7 @@ def review_comment(item, documents, review_url=None, budget=58000, options=None)
     remaining = budget - comment_size(prefix + footer + ''.join(sections)) - 500
     share = max(0, remaining // max(sum(bool(section) for section in sections), 1))
     sections = [preview_section(d, opened=count == 1, text_budget=share, options=options)
-                if share >= 600 or options.pages and d['images'] else '' for d in included]
+                if share >= 600 or options.images_enabled and d['images'] else '' for d in included]
     body = prefix + ''.join(sections) + footer
     if comment_size(body) > budget:
         raise ValueError('Review comment exceeds its size budget')
@@ -454,7 +462,7 @@ def build(catalog_path, output, base_url, comments_path, options=None):
     cards, comments = [], []
     with ExitStack() as stack:
         browser = None
-        if options.pages and options.inline_preview and options.preview_count and options.mode != 'latest':
+        if options.images_enabled:
             playwright = stack.enter_context(sync_playwright())
             browser_args = {'headless': True}
             if os.environ.get('CHROME_PATH'):
@@ -501,6 +509,8 @@ def build(catalog_path, output, base_url, comments_path, options=None):
                                  '../' if document_name and options.mode == 'both' else '')
                     if options.mode == 'latest':
                         url = latest_url
+                        if browser:
+                            images = render_images(browser, latest_changes, latest_dir, options.preview_count, options.context_paragraphs)
                 # Keep downloadable Word results even if HTML rendering failed.
                 for field in ('redline', 'document', 'latest'):
                     if record.get(field):
@@ -520,6 +530,9 @@ def build(catalog_path, output, base_url, comments_path, options=None):
                 label = html.escape(record['path'])
                 available = (directory / 'index.html').exists()
                 links.append(f'<li><a href="file-{key}/">{label}</a> — {review_status(record, options.mode)}</li>' if available else f'<li>{label} — {review_status(record, options.mode)}</li>')
+                if options.image_host == 'branch':
+                    for picture in images:
+                        picture['url'] = f"{IMAGE_URL}/{relative}/{picture['name']}"
                 documents.append({'record': record, 'url': url, 'latest_url': latest_url,
                                   'changes': changes, 'latest_changes': latest_changes, 'images': images})
             directory = output / pr_relative

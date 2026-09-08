@@ -19,6 +19,14 @@ on:
         description: Publish the full viewer to GitHub Pages. Explicit opt-in; owns the entire site.
         type: boolean
         default: false
+      image-host:
+        description: auto uses Pages images when enabled and text otherwise; branch hosts PNGs without Pages; none uses text.
+        type: string
+        default: auto
+      preview-branch:
+        description: Dedicated image branch for image-host branch (public repositories, contents write required).
+        type: string
+        default: docx-previews
       allow-pages-overwrite:
         description: Explicitly permit replacing an existing unrelated Pages site.
         type: boolean
@@ -44,7 +52,7 @@ on:
         type: number
         default: 1
       preview-count:
-        description: Contextual excerpts per document; rendered as images with Pages (0–20).
+        description: Contextual excerpts per document; images when image hosting is enabled (0–20).
         type: number
         default: 2
       max-passages:
@@ -163,8 +171,15 @@ jobs:
       - name: Install the preview renderer
         run: |
           python -m pip install lxml==6.0.2 playwright==1.58.0
-      - name: Install the screenshot browser for Pages excerpts
-        if: inputs.pages && inputs.inline-preview && inputs.preview-count > 0 && inputs.mode != 'latest'
+      - name: Validate review options
+        run: python .docx-actions/action/preview/options.py
+      - name: Verify the dedicated image branch
+        if: inputs.image-host == 'branch' && inputs.comments && inputs.inline-preview && inputs.preview-count > 0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .docx-actions/action/preview/images.py check
+      - name: Install the screenshot browser
+        if: inputs.inline-preview && inputs.preview-count > 0 && ((inputs.image-host == 'auto' && inputs.pages) || (inputs.image-host == 'branch' && inputs.comments))
         run: python -m playwright install --with-deps chromium
       - name: Read comparison artifacts for open pull requests
         env:
@@ -188,6 +203,11 @@ jobs:
         env:
           PAGES_URL: ${{ steps.pages.outputs.base_url }}
         run: python .docx-actions/action/preview/render.py --base-url "$PAGES_URL"
+      - name: Publish comment images without Pages
+        if: inputs.image-host == 'branch' && inputs.comments && inputs.inline-preview && inputs.preview-count > 0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .docx-actions/action/preview/images.py publish
       - name: Preserve the complete review and change logs
         id: bundle
         uses: actions/upload-artifact@v4

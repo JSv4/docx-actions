@@ -12,7 +12,7 @@ from urllib.parse import quote
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 import zipfile
-from options import Options
+from options import IMAGE_URL, Options
 
 
 def api(path, payload=None, method=None):
@@ -164,6 +164,8 @@ def post(comments_path, base_url='', artifact_url=''):
         if preview['file_count'] == 0 and not owned:
             continue
         body = preview['body']
+        if IMAGE_URL in body:
+            raise ValueError('Preview images must be published before commenting')
         placeholder = 'https://docx-actions.invalid/review-artifact'
         if placeholder in body:
             if not artifact_url.startswith(f'https://github.com/{repo}/actions/runs/'):

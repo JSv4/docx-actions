@@ -8,8 +8,9 @@ expandable change logs. Download the Word files with native tracked changes and
 the complete HTML and change logs from the linked Actions artifact.
 **No GitHub Pages setup or personal token is needed.**
 
-The optional Pages viewer preserves document layout, adds screenshot excerpts to
-the comment, and provides navigation through the full document. You can also
+For styled screenshot excerpts without Pages, public repositories can enable
+[`image-host: branch`](#show-styled-previews-without-pages). The optional Pages
+viewer provides navigation through the full document. You can also
 render just the latest versions, or generate both versions and redlines.
 Powered by [Docxodus](https://github.com/JSv4/Docxodus) through
 [Python-Redlines](https://github.com/JSv4/Python-Redlines).
@@ -77,6 +78,49 @@ Set `mode: both` to include redlines and latest versions. The comment includes
 both text views, the download contains both, and Pages adds links to switch
 between them. Discovery still applies only to files changed in the PR.
 
+## Show styled previews without Pages
+
+In a **public repository**, enable screenshot excerpts using a dedicated image
+branch. The standard Actions token is sufficient; add `contents: write` to the
+caller and set one presentation option:
+
+```yaml
+permissions:
+  contents: write
+  actions: read
+  pull-requests: write
+
+jobs:
+  review:
+    uses: JSv4/docx-actions/.github/workflows/review.yml@v2
+    with:
+      image-host: branch
+```
+
+The comment preserves document fonts, layout, and revision colors in contextual
+PNG excerpts. **Enlarge excerpt** opens the full-size image; expandable text
+change logs and Word/HTML artifact downloads remain in the same comment. Latest
+mode also supports image excerpts of the current document. All DOCX discovery
+remains automatic.
+
+The action creates `docx-previews` independently of the source history and stores
+only generated PNGs and branch metadata there. It never merges this branch into
+your source branch or deploys Pages. You can select another unused branch with
+`preview-branch`. An existing branch must carry the action's matching ownership
+marker; the default branch is always rejected. Repository rules must allow the
+Actions token to create/update the dedicated branch.
+
+Image links are pinned to commits, so subsequent reviews cannot change old
+excerpts. Previous images remain in Git history even after PR closure or artifact
+expiry; they are public and add to repository storage. Private repositories are
+rejected for this option because anonymous raw image URLs cannot serve their
+content. Keep `image-host: auto` for the existing text-only default there.
+
+Image hosting is independent of Pages: `image-host: branch` can also accompany
+`pages: true`, in which case excerpt links open the full Pages document. The
+default `image-host: auto` uses Pages images only when Pages is enabled and text
+otherwise. `image-host: none` keeps text excerpts even with Pages enabled.
+
 ## Enable the full Pages viewer
 
 Pages is **off by default**. To enable it, set **Settings → Pages → Source:
@@ -124,13 +168,15 @@ All settings are optional. Document discovery is independent of presentation.
 |---|---|---|
 | `mode` | `redline` | `redline`, `latest`, or `both`. Latest skips comparison. |
 | `pages` | `false` | Deploy the full viewer and host screenshot excerpts. |
+| `image-host` | `auto` | `auto`: Pages images when enabled, text otherwise. `branch`: PNGs on a dedicated public-repository branch. `none`: text excerpts. |
+| `preview-branch` | `docx-previews` | Dedicated branch for `image-host: branch`; requires `contents: write`. |
 | `allow-pages-overwrite` | `false` | Explicitly authorize replacing an unrelated or unverifiable Pages site. |
 | `comments` | `true` | Create/update the consolidated PR comment. Independent of Pages. |
 | `inline-preview` | `true` | Include contextual excerpts or latest-version text. |
 | `change-log` | `true` | Include an expandable change log in redline/both modes. |
 | `downloads` | `true` | Show download links. Generated files remain in artifacts when disabled. |
 | `context-paragraphs` | `1` | Paragraphs before and after an excerpt, from `0` to `10`. Long inline context is shortened visibly. |
-| `preview-count` | `2` | Contextual excerpts per document, from `0` to `20`. Pages renders these as images. |
+| `preview-count` | `2` | Contextual excerpts per document, from `0` to `20`. Image hosting renders these as screenshots. |
 | `max-passages` | `0` | Maximum inline change-log/latest-version passages per document; `0` means as many as fit. |
 | `comment-budget` | `58000` | Total comment character budget, from `4000` to `58000`, shared across documents. |
 | `files` | `**/*.docx` | Optional newline-separated Git pathspec globs restricting discovery. |
@@ -160,9 +206,11 @@ with:
 
 Comments contain a supported HTML subset: inserted/deleted text, basic emphasis,
 and expandable sections. Moves and formatting are labeled in the change log.
-Table rows separate cell text with `|`. Exact Word layout appears in the optional
-Pages screenshots/viewer and in the Word download, rather than in comment text.
-Comment-only mode needs no screenshot browser or external image hosting.
+Table rows separate cell text with `|`. Styled image excerpts retain document
+layout and revision colors with either branch or Pages hosting. GitHub strips
+document CSS from native comment text. The text-only default needs no screenshot
+browser or image hosting. Disabling `inline-preview`, setting `preview-count: 0`,
+or disabling comments skips branch image publication entirely.
 
 Each review bundle contains an HTML index, per-document HTML and Word files, and
 complete `CHANGELOG.md` reports for each document and PR. Change logs describe the
@@ -192,8 +240,9 @@ runs again. Merely changing a presentation mode cannot recreate missing outputs.
 
 Version 2 makes Pages opt-in and enables inline comments without hosting. Existing
 `@v1` and `@v1.0.0` installations retain their original behavior; the `v1` tag is
-not moved to version 2. `@v2` tracks compatible version 2 updates, and `@v2.0.0`
-pins this release.
+not moved to version 2. `@v2` tracks compatible version 2 updates; `@v2.1.0`
+pins the release adding optional branch image hosting. Existing version 2
+workflows keep their behavior and permission requirements until they opt in.
 
 - To keep your existing Pages experience, switch to `@v2` and add `pages: true`.
 - To adopt the default comment-only review, switch to `@v2` and remove Pages/OIDC
@@ -235,7 +284,9 @@ accepts artifacts only from that caller's trusted review workflow, validates the
 metadata and paths, and disables scripts and external requests in document HTML.
 
 The review job inherits the caller's permissions. The default caller grants no
-Pages or OIDC access. Pages users explicitly add both permissions; disabling
+Pages or OIDC access. Branch image hosting adds `contents: write` only to the
+review job; the comparison job keeps its explicit read-only permissions.
+Pages users explicitly add both Pages permissions; disabling
 comments also permits omitting `pull-requests: write` in favor of read access.
 Keep the trusted event and job structure intact; do not execute PR-head scripts
 in a privileged workflow. This installation targets GitHub.com and GitHub-hosted
@@ -253,5 +304,6 @@ python tests/browser_smoke.py
 ```
 
 Tests cover real comparisons, latest-only rendering, multiple files and renames,
-inline controls, context, comment size limits, artifact provenance, Pages site
-ownership, and browser navigation. MIT licensed; see [NOTICE.md](NOTICE.md).
+inline controls, context, comment size limits, artifact provenance, Pages and
+image-branch ownership, immutable image URLs, and browser navigation. MIT
+licensed; see [NOTICE.md](NOTICE.md).

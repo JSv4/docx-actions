@@ -72,7 +72,7 @@ def test_single_document_opens_only_its_preview():
     root = ET.HTML(comment)
     assert len(root.xpath('//details[@open]')) == 1
     assert root.xpath('//details[@open]/summary[contains(., "Preview changes:")]')
-    assert root.xpath('//details[@open]/details[not(@open)]')
+    assert root.xpath('//details[@open]/blockquote/details[not(@open)]')
 
 
 def test_long_documents_share_comment_space_without_hiding_other_previews():

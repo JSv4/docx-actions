@@ -283,12 +283,12 @@ def passage_list(changes, url, budget, max_passages=0, latest=False, downloads=T
         label = 'Change log · ' + label
     else:
         label = 'Latest version · ' + label
-    lines = ['<details>', f'<summary>{label}</summary>', '', *passages]
+    lines = ['<details>', f'<summary>{label}</summary>', '', '<blockquote>', '', *passages]
     if len(passages) < len(changes):
         target = url or ARTIFACT_URL
         description = 'Continue through all passages in the full viewer' if url else 'Download the complete review and change log'
         lines += [f'[{description}]({target})' if url or downloads else 'Remaining passages are retained in the review artifact.', '']
-    lines += ['</details>', '']
+    lines += ['</blockquote>', '', '</details>', '']
     return '\n'.join(lines)
 
 
@@ -323,7 +323,9 @@ def preview_section(document, opened=False, text_budget=0, options=None):
     if not options.inline_preview and (not options.change_log or latest):
         return ''
     label = 'Preview latest version:' if options.mode == 'latest' else 'Preview document:' if latest else 'Preview changes:'
-    lines = ['<details open>' if opened else '<details>', f"<summary>{label} {filename_markup(record['path'])}</summary>", '']
+    # GitHub strips custom CSS. Its native blockquote adds indentation and a
+    # vertical rule that keeps images and nested logs inside their document.
+    lines = ['<details open>' if opened else '<details>', f"<summary>{label} {filename_markup(record['path'])}</summary>", '', '<blockquote>', '']
     if record.get('previous_path'):
         lines += [f"Previously {filename_markup(record['previous_path'])}.", '']
     if options.images_enabled:
@@ -335,7 +337,7 @@ def preview_section(document, opened=False, text_budget=0, options=None):
             lines += [f"[![{kind} with preceding and following context]({image_url})]({link})", '',
                       f'**[⤢ {expand} ↗]({link})**', '']
     if text_budget < 600:
-        return '\n'.join(lines + ['</details>', ''])
+        return '\n'.join(lines + ['</blockquote>', '', '</details>', ''])
     latest_budget = text_budget // 3 if options.mode == 'both' and options.inline_preview else 0
     text_budget -= latest_budget
     used = 0
@@ -360,7 +362,7 @@ def preview_section(document, opened=False, text_budget=0, options=None):
     if latest_budget:
         lines += [passage_list(document.get('latest_changes', []), document.get('latest_url') if options.pages else None, latest_budget,
                                options.max_passages, latest=True, downloads=options.downloads), '']
-    lines += ['</details>', '']
+    lines += ['</blockquote>', '', '</details>', '']
     return '\n'.join(lines)
 
 

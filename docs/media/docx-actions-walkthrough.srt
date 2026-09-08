@@ -1,39 +1,44 @@
 1
 00:00:00,000 --> 00:00:03,000
-Review your Word documents right in GitHub.
-Automatic redlines for every changed .docx.
+Review Word documents in GitHub.
+Every changed .docx, with the context you need.
 
 2
 00:00:03,000 --> 00:00:07,000
 Open a pull request with your Word edits.
-This demo compares three complete NVCA charters.
+Three complete NVCA charters, in three different locations.
 
 3
-00:00:07,000 --> 00:00:13,000
+00:00:07,000 --> 00:00:12,000
 Multiple changed .docx in one review.
-All three files are found automatically, wherever they live.
+43, 45, and 46 revisions. Every document found automatically.
 
 4
-00:00:13,000 --> 00:00:21,000
+00:00:12,000 --> 00:00:19,000
 Easily preview without losing context.
-See what changed, with the text before and after.
+Styled redlines with the surrounding text, directly in the PR.
 
 5
-00:00:21,000 --> 00:00:29,000
-Explore the full document one change at a time.
-Use Previous and Next to move through the full redline.
+00:00:19,000 --> 00:00:27,000
+Keep each document’s changes together.
+Expand its change log and keep the hierarchy in view.
 
 6
-00:00:29,000 --> 00:00:33,000
-Download a Word file with native tracked changes.
-Keep reviewing in Word with insertions, deletions, and moves.
+00:00:27,000 --> 00:00:32,000
+Take a closer look at any excerpt.
+Open the full-size image. No Pages deployment needed.
 
 7
-00:00:33,000 --> 00:00:39,000
-Add one workflow to review all changed Word files.
-Enable GitHub Pages once, then add this workflow.
+00:00:32,000 --> 00:00:36,000
+Download the complete review.
+Word files with tracked changes, HTML, and full change logs.
 
 8
-00:00:39,000 --> 00:00:43,000
+00:00:36,000 --> 00:00:42,000
+One workflow finds every changed Word file.
+Styled previews in this public repo use image-host: branch.
+
+9
+00:00:42,000 --> 00:00:45,000
 Try it on your next pull request.
 github.com/JSv4/docx-actions

@@ -15,11 +15,12 @@ render just the latest versions, or generate both versions and redlines.
 Powered by [Docxodus](https://github.com/JSv4/Docxodus) through
 [Python-Redlines](https://github.com/JSv4/Python-Redlines).
 
-**[Watch the Pages walkthrough](docs/media/docx-actions-walkthrough.mp4)** ·
+**[Watch the walkthrough](docs/media/docx-actions-walkthrough.mp4)** ·
 [Download MP4](https://raw.githubusercontent.com/JSv4/docx-actions/main/docs/media/docx-actions-walkthrough.mp4) ·
+[GIF highlights](docs/media/docx-actions-walkthrough.gif) ·
 [Try the demo](https://github.com/JSv4/docxodus-action-demo/pull/1)
 
-<a href="docs/media/docx-actions-walkthrough.mp4"><img src="docs/media/docx-actions-poster.png" alt="Review Word documents with the optional Pages viewer" width="480"></a>
+<a href="docs/media/docx-actions-walkthrough.mp4"><img src="docs/media/docx-actions-poster.png" alt="Styled Word previews and nested change logs directly in a GitHub pull request" width="480"></a>
 
 <a id="install-once"></a>
 
